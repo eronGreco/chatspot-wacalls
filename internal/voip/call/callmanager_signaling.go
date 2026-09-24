@@ -11,7 +11,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-func (m *CallManager) HandleCallOffer(ctx context.Context, node *waBinary.Node, peerJid types.JID) {
+func (m *CallManager) HandleCallOffer(ctx context.Context, node *waBinary.Node, peerJid types.JID, callerPn string) {
 	info := signaling.ExtractNodeInfo(node)
 	if info == nil {
 		return
@@ -50,7 +50,7 @@ func (m *CallManager) HandleCallOffer(ctx context.Context, node *waBinary.Node, 
 	}
 
 	m.mu.Lock()
-	call := NewIncomingCall(callID, peerJid.String(), creator, "", mediaType)
+	call := NewIncomingCall(callID, peerJid.String(), creator, callerPn, mediaType)
 	if callKey != nil {
 		call.EncryptionKey = callKey
 	}
@@ -273,10 +273,28 @@ func (m *CallManager) HandleCallTerminate(node *waBinary.Node) {
 		}
 	}
 	m.log.Info("call terminated by peer", "call_id", call.CallID, "reason", string(reason))
+
+	// If one of the remote contact's devices rejects/terminates an outgoing call
+	// before media ever connects, propagate a terminate back to the contact. This
+	// makes WhatsApp stop ringing on the contact's other linked devices too.
+	propagateTerminate := call.Direction == core.CallDirectionOutgoing && call.StateData.ConnectedAt == nil
+	peer := wanode.MustJID(call.PeerJid)
+	callID := call.CallID
+	creator := wanode.MustJID(call.CallCreator)
+
 	_ = call.ApplyTransition(Transition{Type: TransitionTerminated, Reason: reason})
 	ended := call
 	m.emitState()
 	m.mu.Unlock()
+
+	if propagateTerminate {
+		stanza := signaling.BuildTerminateStanza(peer, callID, creator)
+		go func() {
+			if _, err := m.sock.Query(context.Background(), stanza); err != nil {
+				m.log.Warn("propagate terminate to linked devices failed", "call_id", callID, "err", err)
+			}
+		}()
+	}
 
 	if m.OnEnded != nil {
 		m.OnEnded(ended)
