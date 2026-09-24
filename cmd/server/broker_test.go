@@ -29,11 +29,11 @@ func TestPeerPhonePersistsIntoHistory(t *testing.T) {
 	b := NewBroker()
 	b.upsertCall(CallRecord{
 		SessionID: "s1",
-		CallID: "c-phone",
+		CallID:    "c-phone",
 		Direction: "inbound",
-		Peer: "144512865284260@lid",
+		Peer:      "144512865284260@lid",
 		PeerPhone: "5537933002826",
-		Status: StatusRinging,
+		Status:    StatusRinging,
 	})
 
 	b.endCall("c-phone", "user")
