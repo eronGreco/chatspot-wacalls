@@ -188,7 +188,8 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.broker.upsertCall(CallRecord{
-		SessionID: sess.id, CallID: callID, Owner: &owner, Direction: "outbound", Peer: peer.String(),
+		SessionID: sess.id, CallID: callID, Owner: &owner, Direction: "outbound",
+		Peer: peer.String(), PeerPhone: normalizePhone(peer.User),
 		StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"call": map[string]string{"callId": callID}})
