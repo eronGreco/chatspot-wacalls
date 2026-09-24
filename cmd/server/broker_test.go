@@ -25,7 +25,6 @@ func TestOwnerActiveCall(t *testing.T) {
 	}
 }
 
-
 func TestPeerPhonePersistsIntoHistory(t *testing.T) {
 	b := NewBroker()
 	b.upsertCall(CallRecord{
