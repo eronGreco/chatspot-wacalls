@@ -56,11 +56,12 @@ func (s *Session) createCall(callID string) *call.CallManager {
 
 func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	cm.OnIncoming = func(c *call.CallInfo) {
+		peerPhone := normalizePhone(c.CallerPn)
 		s.mgr.broker.upsertCall(CallRecord{
-			SessionID: s.id, CallID: c.CallID, Direction: "inbound", Peer: c.PeerJid,
+			SessionID: s.id, CallID: c.CallID, Direction: "inbound", Peer: c.PeerJid, PeerPhone: peerPhone,
 			StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
 		})
-		s.mgr.broker.emitIncoming(s.id, c.CallID, c.PeerJid)
+		s.mgr.broker.emitIncoming(s.id, c.CallID, c.PeerJid, peerPhone)
 	}
 	cm.OnStateChange = func(c *call.CallInfo) {
 		if c.IsEnded() {
@@ -73,13 +74,22 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 			dir = "inbound"
 		}
 		existing, _ := s.mgr.broker.getCall(c.CallID)
+		peerPhone := normalizePhone(c.CallerPn)
+		if dir == "outbound" {
+			if jid, err := types.ParseJID(c.PeerJid); err == nil && jid.Server == types.DefaultUserServer {
+				peerPhone = normalizePhone(jid.User)
+			}
+		}
 		rec := CallRecord{
-			SessionID: s.id, CallID: c.CallID, Direction: dir, Peer: c.PeerJid,
+			SessionID: s.id, CallID: c.CallID, Direction: dir, Peer: c.PeerJid, PeerPhone: peerPhone,
 			StartedAt: time.Now().UnixMilli(), Status: mapStatus(c.StateData.State),
 		}
 		if existing != nil {
 			rec.Owner = existing.Owner
 			rec.StartedAt = existing.StartedAt
+			if rec.PeerPhone == "" {
+				rec.PeerPhone = existing.PeerPhone
+			}
 		}
 		s.mgr.broker.upsertCall(rec)
 	}
@@ -124,8 +134,26 @@ func (s *Session) onIncomingOffer(ctx context.Context, evt *events.CallOffer) {
 		s.rejectOffer(ctx, node, evt.From)
 		return
 	}
+
+	callerPn := ""
+	if !evt.CallCreatorAlt.IsEmpty() && evt.CallCreatorAlt.Server == types.DefaultUserServer {
+		callerPn = normalizePhone(evt.CallCreatorAlt.User)
+	}
+	if callerPn == "" && s.client.Store != nil && s.client.Store.LIDs != nil {
+		for _, candidate := range []types.JID{evt.From, evt.CallCreator} {
+			if candidate.Server != types.HiddenUserServer {
+				continue
+			}
+			pn, err := s.client.Store.LIDs.GetPNForLID(ctx, candidate.ToNonAD())
+			if err == nil && !pn.IsEmpty() {
+				callerPn = normalizePhone(pn.User)
+				break
+			}
+		}
+	}
+
 	cm := s.createCall(callID)
-	cm.HandleCallOffer(ctx, node, evt.From)
+	cm.HandleCallOffer(ctx, node, evt.From, callerPn)
 }
 
 func (s *Session) rejectOffer(ctx context.Context, node *waBinary.Node, from types.JID) {

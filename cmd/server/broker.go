@@ -22,6 +22,7 @@ type CallRecord struct {
 	Owner     *string    `json:"owner"`
 	Direction string     `json:"direction"`
 	Peer      string     `json:"peer"`
+	PeerPhone string     `json:"peerPhone,omitempty"`
 	StartedAt int64      `json:"startedAt"`
 	Status    CallStatus `json:"status"`
 	EndedAt   *int64     `json:"endedAt,omitempty"`
@@ -116,7 +117,7 @@ func (b *Broker) upsertCall(r CallRecord) {
 	b.broadcastCallList()
 	b.broadcast(map[string]any{
 		"type": "call-status", "sessionId": r.SessionID, "id": r.CallID, "owner": r.Owner,
-		"status": r.Status, "peer": r.Peer, "startedAt": r.StartedAt,
+		"status": r.Status, "peer": r.Peer, "peerPhone": r.PeerPhone, "startedAt": r.StartedAt,
 	})
 }
 
@@ -175,10 +176,13 @@ func (b *Broker) endCall(id, reason string) {
 	b.history = append(b.history, ended)
 	owner := c.Owner
 	sessionID := c.SessionID
+	peer := c.Peer
+	peerPhone := c.PeerPhone
 	b.mu.Unlock()
 
 	b.broadcast(map[string]any{
-		"type": "call-ended", "sessionId": sessionID, "id": id, "owner": owner, "reason": reason, "endedAt": now,
+		"type": "call-ended", "sessionId": sessionID, "id": id, "owner": owner,
+		"peer": peer, "peerPhone": peerPhone, "reason": reason, "endReason": reason, "endedAt": now,
 	})
 	b.broadcastCallList()
 }
@@ -193,14 +197,20 @@ func (b *Broker) broadcastCallList() {
 	b.broadcast(map[string]any{"type": "call-list", "calls": list})
 }
 
-func (b *Broker) emitIncoming(sessionID, id, peer string) {
+func (b *Broker) emitIncoming(sessionID, id, peer, peerPhone string) {
 	b.broadcast(map[string]any{
-		"type": "incoming", "sessionId": sessionID, "id": id, "peer": peer, "offeredAt": time.Now().UnixMilli(),
+		"type": "incoming", "sessionId": sessionID, "id": id, "peer": peer,
+		"peerPhone": peerPhone, "offeredAt": time.Now().UnixMilli(),
 	})
 }
 
 func (b *Broker) emitIncomingClaimed(sessionID, id, owner string) {
-	b.broadcast(map[string]any{"type": "incoming-claimed", "sessionId": sessionID, "id": id, "owner": owner})
+	ev := map[string]any{"type": "incoming-claimed", "sessionId": sessionID, "id": id, "owner": owner}
+	if call, ok := b.getCall(id); ok {
+		ev["peer"] = call.Peer
+		ev["peerPhone"] = call.PeerPhone
+	}
+	b.broadcast(ev)
 }
 
 func (b *Broker) historyRows(sessionID string, limit int) []CallRecord {
