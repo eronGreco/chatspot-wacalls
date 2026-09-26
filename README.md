@@ -1,9 +1,9 @@
 <div align="center">
 
-# 📞 WaCalls (Go)
+# 📞 Chatspot WaCalls
 
-**Native WhatsApp voice calls in pure Go, straight from the browser.**
-Built for native VoIP media, multi-account (multi-session) operation, and a modern browser client.
+**WaCalls adapted for Chatspot Calls.**
+Native WhatsApp voice calls in pure Go, with Chatspot-specific compatibility fixes for phone identification and call lifecycle handling.
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
@@ -11,9 +11,32 @@ Built for native VoIP media, multi-account (multi-session) operation, and a mode
 [![pion](https://img.shields.io/badge/pion-WebRTC-FF6B6B)](https://github.com/pion/webrtc)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
-[Overview](#overview) · [Architecture](#architecture) · [Quick Start](#quick-start) · [API](#api) · [Security](#security)
+[Chatspot changes](#what-changed-in-this-fork) · [Upstream](#upstream) · [Overview](#overview) · [Architecture](#architecture) · [Quick Start](#quick-start) · [API](#api)
 
 </div>
+
+---
+
+> [!NOTE]
+> This repository is a **Chatspot-oriented fork** of [JotaDev66/WaCalls](https://github.com/JotaDev66/WaCalls). The native VoIP stack and the original WaCalls architecture are preserved. This fork adds only the compatibility changes required by Chatspot Calls.
+
+## What changed in this fork
+
+Compared with the upstream WaCalls release used as the base, this repository adds:
+
+- **Real phone resolution for inbound calls:** resolves WhatsApp LID identifiers to the actual phone number when `caller_pn` is available or the local LID mapping already knows the association.
+- **`peerPhone` in the server payloads:** exposes the resolved phone number alongside the original WhatsApp `peer` identifier in call status, incoming-call events, claimed calls, ended calls, active-call listings and call history.
+- **Outbound phone preservation:** keeps `peerPhone` available for outgoing calls as well, making it easier for Chatspot to associate a WhatsApp call with the correct contact.
+- **Linked-device ringing fix:** when an outbound call ends before the media connection is established, the terminate signal is propagated so other linked WhatsApp devices stop ringing.
+- **Regression coverage:** includes tests for the Chatspot-specific `peerPhone` behavior and call history payloads.
+
+These changes do **not** change the existing SQLite database format or the WhatsApp pairing/session data.
+
+Implementation notes are also kept in [`CHATSPOT_PATCHES.md`](./CHATSPOT_PATCHES.md).
+
+## Upstream
+
+The original project is [**JotaDev66/WaCalls**](https://github.com/JotaDev66/WaCalls). This fork intentionally keeps the upstream architecture, license and contributor credits while maintaining a small Chatspot-specific compatibility layer.
 
 ---
 
@@ -129,8 +152,8 @@ pure Go (`internal/voip/media/mlow`).
 
 ```bash
 # clone and enter the project
-git clone <repo-url> wacalls-go
-cd wacalls-go
+git clone https://github.com/eronGreco/chatspot-wacalls.git
+cd chatspot-wacalls
 
 # Go dependencies
 go mod download
