@@ -1,0 +1,67 @@
+name: Alpha release
+
+on:
+  push:
+    branches:
+      - "v2/meowcaller"
+
+permissions:
+  contents: write
+
+jobs:
+  alpha:
+    if: contains(github.event.head_commit.message, '[alpha-release]')
+    runs-on: ubuntu-latest
+    env:
+      TAG: v2.0.0-alpha.1
+      CGO_ENABLED: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify modules
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Build linux/amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w" -o dist/wacalls-server-linux-amd64 ./cmd/server
+          sha256sum dist/wacalls-server-linux-amd64 > dist/wacalls-server-linux-amd64.sha256
+
+      - name: Smoke test binary
+        run: |
+          test -s dist/wacalls-server-linux-amd64
+          file dist/wacalls-server-linux-amd64
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Chatspot Calls v2.0.0-alpha.1
+          prerelease: true
+          draft: false
+          generate_release_notes: false
+          body: |
+            Primeira build de validação da migração para Meowcaller + HyperMeow.
+
+            Uso exclusivo para homologação no Portainer. Não substituir a produção antes de passar a matriz de paridade.
+
+            O motor VoIP manual legado foi removido desta linha v2. Permanecem a API/SSE do Chatspot Calls, sessões/QR, bridge WebRTC do navegador, peerPhone e gravação server-side com entrega final no Chatspot.
+
+            Gates antes de produção: restauração de sessão, QR, ligação de saída, ligação de entrada, accept/reject/end, áudio bidirecional, peerPhone/LID, ownership, gravação estéreo, upload/transcrição no Chatspot e recovery após restart.
+          files: |
+            dist/wacalls-server-linux-amd64
+            dist/wacalls-server-linux-amd64.sha256
