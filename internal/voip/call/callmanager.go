@@ -45,6 +45,7 @@ type CallManager struct {
 	OnStateChange func(*CallInfo)
 	OnIncoming    func(*CallInfo)
 	OnEnded       func(*CallInfo)
+	OnSelfAudio   func([]float32)
 	OnPeerAudio   func([]float32)
 }
 

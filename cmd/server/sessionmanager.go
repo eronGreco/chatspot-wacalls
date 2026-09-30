@@ -13,29 +13,31 @@ import (
 )
 
 type SessionManager struct {
-	appCtx    context.Context
-	container *sqlstore.Container
-	broker    *Broker
-	store     *sessionStore
-	waLogger  waLog.Logger
-	log       *slog.Logger
-	maxCalls  int
+	appCtx     context.Context
+	container  *sqlstore.Container
+	broker     *Broker
+	store      *sessionStore
+	waLogger   waLog.Logger
+	log        *slog.Logger
+	maxCalls   int
+	recordings *recordingService
 
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	order    []string
 }
 
-func newSessionManager(ctx context.Context, container *sqlstore.Container, broker *Broker, store *sessionStore, waLogger waLog.Logger, log *slog.Logger, maxCalls int) *SessionManager {
+func newSessionManager(ctx context.Context, container *sqlstore.Container, broker *Broker, store *sessionStore, waLogger waLog.Logger, log *slog.Logger, maxCalls int, recordings *recordingService) *SessionManager {
 	return &SessionManager{
-		appCtx:    ctx,
-		container: container,
-		broker:    broker,
-		store:     store,
-		waLogger:  waLogger,
-		log:       log,
-		maxCalls:  maxCalls,
-		sessions:  map[string]*Session{},
+		appCtx:     ctx,
+		container:  container,
+		broker:     broker,
+		store:      store,
+		waLogger:   waLogger,
+		log:        log,
+		maxCalls:   maxCalls,
+		recordings: recordings,
+		sessions:   map[string]*Session{},
 	}
 }
 

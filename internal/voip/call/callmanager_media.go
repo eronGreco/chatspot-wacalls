@@ -20,6 +20,10 @@ func (m *CallManager) initCodec() {
 }
 
 func (m *CallManager) FeedCapturedPCM(data []float32) {
+	if len(data) > 0 && m.OnSelfAudio != nil {
+		m.OnSelfAudio(data)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

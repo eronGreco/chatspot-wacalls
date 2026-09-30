@@ -65,10 +65,15 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	}
 	cm.OnStateChange = func(c *call.CallInfo) {
 		if c.IsEnded() {
+			s.mgr.recordings.finish(c.CallID)
 			s.removeCall(c.CallID)
 			s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 			return
 		}
+		if c.IsActive() && c.StateData.ConnectedAt != nil {
+			s.mgr.recordings.start(c.CallID, *c.StateData.ConnectedAt)
+		}
+
 		dir := "outbound"
 		if c.Direction == core.CallDirectionIncoming {
 			dir = "inbound"
@@ -94,10 +99,15 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 		s.mgr.broker.upsertCall(rec)
 	}
 	cm.OnEnded = func(c *call.CallInfo) {
+		s.mgr.recordings.finish(c.CallID)
 		s.removeCall(c.CallID)
 		s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 	}
+	cm.OnSelfAudio = func(pcm16 []float32) {
+		s.mgr.recordings.writeAgent(callID, pcm16)
+	}
 	cm.OnPeerAudio = func(pcm16 []float32) {
+		s.mgr.recordings.writeCustomer(callID, pcm16)
 		ac, ok := s.reg.get(callID)
 		if !ok || ac.bridge == nil {
 			return

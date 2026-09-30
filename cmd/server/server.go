@@ -11,10 +11,11 @@ import (
 )
 
 type server struct {
-	broker    *Broker
-	sessions  *SessionManager
-	log       *slog.Logger
-	staticDir string
+	broker     *Broker
+	sessions   *SessionManager
+	recordings *recordingService
+	log        *slog.Logger
+	staticDir  string
 }
 
 func openDB(dbPath string) (*sql.DB, error) {
@@ -46,9 +47,14 @@ func newServer(ctx context.Context, dbPath, staticDir string, maxCalls int, log 
 		waLogger = waLog.Stdout("WA", "INFO", true)
 	}
 
+	recordings, err := newRecordingService(ctx, recordingConfigFromEnv(dbPath), log)
+	if err != nil {
+		return nil, err
+	}
+
 	broker := NewBroker()
-	mgr := newSessionManager(ctx, container, broker, store, waLogger, log, maxCalls)
+	mgr := newSessionManager(ctx, container, broker, store, waLogger, log, maxCalls, recordings)
 	broker.SnapshotFn = mgr.snapshotEvents
 
-	return &server{broker: broker, sessions: mgr, log: log, staticDir: staticDir}, nil
+	return &server{broker: broker, sessions: mgr, recordings: recordings, log: log, staticDir: staticDir}, nil
 }
