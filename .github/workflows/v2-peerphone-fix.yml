@@ -10,79 +10,23 @@ permissions:
 
 jobs:
   patch:
-    if: contains(github.event.head_commit.message, '[v2-peerphone-fix]')
+    if: ${{ contains(github.event.head_commit.message, '[v2-peerphone-fix]') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           ref: v2/meowcaller
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Preserve peerPhone in outbound call records
+      - name: Apply patch
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('cmd/server/httpapi.go')
-          s = p.read_text()
-
-          old = '''\tvar callID, peerStr string
-\tvar err error
-\tif group != "" {
-\t\tcallID, err = sess.startOutgoingGroup(r.Context(), group, body.Video)
-\t\tpeerStr = group
-\t} else {
-\t\tpeer := types.NewJID(normalizePhone(body.Phone), types.DefaultUserServer)
-\t\tcallID, err = sess.startOutgoing(r.Context(), peer, body.Video, nil)
-\t\tpeerStr = peer.String()
-\t}
-'''
-          new = '''\tvar callID, peerStr, peerPhone string
-\tvar err error
-\tif group != "" {
-\t\tcallID, err = sess.startOutgoingGroup(r.Context(), group, body.Video)
-\t\tpeerStr = group
-\t} else {
-\t\tpeer := types.NewJID(normalizePhone(body.Phone), types.DefaultUserServer)
-\t\tcallID, err = sess.startOutgoing(r.Context(), peer, body.Video, nil)
-\t\tpeerStr = peer.String()
-\t\tpeerPhone = normalizePhone(peer.User)
-\t}
-'''
-          assert old in s, 'start-call block changed; refusing unsafe patch'
-          s = s.replace(old, new, 1)
-
-          old = '''\ts.broker.upsertCall(CallRecord{
-\t\tSessionID: sess.id, CallID: callID, Owner: &owner, Direction: "outbound", Peer: peerStr,
-\t\tMedia: callMedia, StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
-\t})
-'''
-          new = '''\ts.broker.upsertCall(CallRecord{
-\t\tSessionID: sess.id, CallID: callID, Owner: &owner, Direction: "outbound", Peer: peerStr, PeerPhone: peerPhone,
-\t\tMedia: callMedia, StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
-\t})
-'''
-          assert old in s, 'outbound CallRecord block changed; refusing unsafe patch'
-          s = s.replace(old, new, 1)
-
-          old = '''\ts.broker.upsertCall(CallRecord{
-\t\tSessionID: targetSess.id, CallID: transferID, Owner: &owner, Direction: "outbound", Peer: rec.Peer,
-\t\tMedia: "audio", StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
-\t})
-'''
-          new = '''\ts.broker.upsertCall(CallRecord{
-\t\tSessionID: targetSess.id, CallID: transferID, Owner: &owner, Direction: "outbound", Peer: rec.Peer, PeerPhone: rec.PeerPhone,
-\t\tMedia: "audio", StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
-\t})
-'''
-          assert old in s, 'transfer CallRecord block changed; refusing unsafe patch'
-          s = s.replace(old, new, 1)
-
-          p.write_text(s)
-          PY
+          python3 scripts/patch_v2_peerphone.py
           gofmt -w cmd/server/httpapi.go
 
       - name: Test
