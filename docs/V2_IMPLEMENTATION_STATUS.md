@@ -85,15 +85,24 @@ Ver:
 
 ## Validação automática
 
-O workflow de CI foi configurado para rodar também em push para `v2/meowcaller` e possui `workflow_dispatch`.
+CI da branch v2 está **verde**.
 
-No momento da criação deste documento, o GitHub ainda não criou nenhum workflow run para a branch/PR. Como este repositório é um fork, confirmar na aba **Actions** se os workflows do fork estão habilitados. Não considerar a branch compilada/testada até aparecerem os jobs `server` e `client` verdes.
+Validado pelo GitHub Actions:
 
-## Gates de paridade obrigatórios
+- server: `go mod download` / `go mod verify`;
+- server: `go vet ./...`;
+- server: `gofmt`;
+- server: `go build ./...`;
+- server: `go test -race -count=1 ./...`;
+- client: `npm ci`;
+- client: TypeScript type-check;
+- client: build de produção.
 
-- CI server: módulos, vet, gofmt, build, testes/race;
-- CI client: typecheck e build;
-- restauração de sessão pareada;
+Isso comprova compilação e testes automatizados, mas não substitui os testes reais contra o WhatsApp e o Chatspot.
+
+## Gates de paridade obrigatórios restantes
+
+- restauração de sessão pareada do banco/volume atual;
 - criação de sessão e QR;
 - chamada 1:1 saída;
 - chamada 1:1 entrada;
