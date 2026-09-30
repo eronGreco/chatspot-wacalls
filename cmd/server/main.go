@@ -10,8 +10,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"wacalls/internal/voip/call"
 )
 
 func main() {
@@ -20,10 +18,7 @@ func main() {
 	staticDir := flag.String("static", "client/dist", "static client directory (optional)")
 	debug := flag.Bool("debug", false, "verbose logging")
 	maxCalls := flag.Int("max-calls-per-session", 8, "max concurrent calls per session (0 = unlimited)")
-	videoDump := flag.Bool("video-dump", false, "dump detalhado de RTP/RTCP de vídeo (debug de packetização)")
 	flag.Parse()
-
-	call.VideoDump = *videoDump
 
 	level := slog.LevelInfo
 	if *debug {
