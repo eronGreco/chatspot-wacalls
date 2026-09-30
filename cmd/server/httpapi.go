@@ -314,7 +314,7 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var callID, peerStr string
+	var callID, peerStr, peerPhone string
 	var err error
 	if group != "" {
 		callID, err = sess.startOutgoingGroup(r.Context(), group, body.Video)
@@ -323,6 +323,7 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		peer := types.NewJID(normalizePhone(body.Phone), types.DefaultUserServer)
 		callID, err = sess.startOutgoing(r.Context(), peer, body.Video, nil)
 		peerStr = peer.String()
+		peerPhone = normalizePhone(peer.User)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -333,7 +334,7 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		callMedia = "video"
 	}
 	s.broker.upsertCall(CallRecord{
-		SessionID: sess.id, CallID: callID, Owner: &owner, Direction: "outbound", Peer: peerStr,
+		SessionID: sess.id, CallID: callID, Owner: &owner, Direction: "outbound", Peer: peerStr, PeerPhone: peerPhone,
 		Media: callMedia, StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"call": map[string]string{"callId": callID}})
@@ -795,7 +796,7 @@ func (s *server) doTransfer(sess *Session, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.broker.upsertCall(CallRecord{
-		SessionID: targetSess.id, CallID: transferID, Owner: &owner, Direction: "outbound", Peer: rec.Peer,
+		SessionID: targetSess.id, CallID: transferID, Owner: &owner, Direction: "outbound", Peer: rec.Peer, PeerPhone: rec.PeerPhone,
 		Media: "audio", StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
 	})
 	s.broker.emitTransferStarted(sess.id, id, transferID)
