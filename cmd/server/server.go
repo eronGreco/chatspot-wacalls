@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"log/slog"
 
-	"go.mau.fi/whatsmeow/store/sqlstore"
-	waLog "go.mau.fi/whatsmeow/util/log"
+	"github.com/polymorfa/hypermeow/store/sqlstore"
+	waLog "github.com/polymorfa/hypermeow/util/log"
 	_ "modernc.org/sqlite"
 )
 
@@ -56,5 +56,11 @@ func newServer(ctx context.Context, dbPath, staticDir string, maxCalls int, log 
 	mgr := newSessionManager(ctx, container, broker, store, waLogger, log, maxCalls, recordings)
 	broker.SnapshotFn = mgr.snapshotEvents
 
-	return &server{broker: broker, sessions: mgr, recordings: recordings, log: log, staticDir: staticDir}, nil
+	return &server{
+		broker:     broker,
+		sessions:   mgr,
+		recordings: recordings,
+		log:        log,
+		staticDir:  staticDir,
+	}, nil
 }
