@@ -28,14 +28,7 @@ O motor VoIP manual herdado do WaCalls foi removido da branch v2:
 - `internal/wa` removido;
 - MLow/RTP/SRTP/RTCP/STUN próprios removidos.
 
-O diretório `internal/voip/media` contém somente 4 helpers genéricos ainda usados pela ponte Browser ↔ Backend:
-
-- `pcm.go`
-- `pcm_test.go`
-- `videoframe.go`
-- `videoframe_test.go`
-
-Eles não implementam o protocolo de chamadas do WhatsApp e podem ser renomeados/movidos depois sem mudança arquitetural.
+O diretório `internal/voip/media` contém somente helpers genéricos usados pela ponte Browser ↔ Backend: PCM e envelope de quadro de vídeo, além dos testes correspondentes. Eles não implementam o protocolo de chamadas do WhatsApp.
 
 ## Portado da v1.1.0-chatspot
 
@@ -74,9 +67,11 @@ Meowcaller Call.Receive
 
 A gravação começa quando a chamada entra em `CallPhaseActive` e é finalizada no teardown da chamada.
 
+O servidor continua sendo apenas armazenamento temporário da gravação. O destino definitivo continua sendo o Chatspot.
+
 ## Contrato Lovable
 
-A etapa de paridade preserva a API/SSE já consumida pelo Chatspot Calls.
+A etapa de paridade preserva a API/SSE já consumida pelo Chatspot Calls. O Lovable não conversa diretamente com Meowcaller nem HyperMeow.
 
 Ver:
 
@@ -98,7 +93,17 @@ Validado pelo GitHub Actions:
 - client: TypeScript type-check;
 - client: build de produção.
 
+Além disso, o patch que preserva `peerPhone` no registro final das chamadas de saída foi aplicado e passou em `go test ./...` antes da alpha 2.
+
 Isso comprova compilação e testes automatizados, mas não substitui os testes reais contra o WhatsApp e o Chatspot.
+
+## Build de homologação
+
+A build destinada ao primeiro teste real é:
+
+`v2.0.0-alpha.2`
+
+A `v2.0.0-alpha.1` foi substituída antes do deploy e não deve ser usada.
 
 ## Gates de paridade obrigatórios restantes
 
@@ -127,4 +132,4 @@ Só então validar e integrar no Chatspot Calls:
 5. chamada de grupo;
 6. vídeo multiparte.
 
-Chamadas em grupo são marcadas como experimentais no Meowcaller e exigem teste real antes de serem tratadas como estáveis.
+Chamadas em grupo são experimentais e exigem teste real antes de serem tratadas como estáveis.
