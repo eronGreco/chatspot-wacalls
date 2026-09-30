@@ -13,7 +13,7 @@ jobs:
     if: contains(github.event.head_commit.message, '[alpha-release]')
     runs-on: ubuntu-latest
     env:
-      TAG: v2.0.0-alpha.1
+      TAG: v2.0.0-alpha.2
       CGO_ENABLED: "0"
 
     steps:
@@ -50,12 +50,14 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Chatspot Calls v2.0.0-alpha.1
+          name: Chatspot Calls v2.0.0-alpha.2
           prerelease: true
           draft: false
           generate_release_notes: false
           body: |
-            Primeira build de validação da migração para Meowcaller + HyperMeow.
+            Segunda build de homologação da migração para Meowcaller + HyperMeow.
+
+            Esta alpha corrige a preservação de `peerPhone` nas chamadas de saída antes do primeiro deploy de homologação.
 
             Uso exclusivo para homologação no Portainer. Não substituir a produção antes de passar a matriz de paridade.
 
