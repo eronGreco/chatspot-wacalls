@@ -34,8 +34,11 @@ const (
 )
 
 type videoReceiveState struct {
-	assembler   rtp.H264AccessUnitAssembler
-	orientation int
+	assembler          rtp.H264AccessUnitAssembler
+	reorder            rtp.VideoReorderBuffer
+	frames, recoveries uint64
+	lastSummary        time.Time
+	orientation        int
 }
 
 // maybeStartMedia launches the media loop for callID once both the callKey and the relay
@@ -630,6 +633,20 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
 		e.mu.Unlock()
 	}()
 	videoReceiveStates := make(map[*participantAudioReceiver]*videoReceiveState)
+	logVideoSummary := func(receiver *participantAudioReceiver, state *videoReceiveState, final bool) {
+		s := state.reorder.Stats()
+		log.Info().Str("call_id", callID).Uint32("ssrc", receiver.videoSSRC).
+			Uint64("packets", s.Received).Uint64("reordered", s.Reordered).
+			Uint64("late_or_duplicate", s.LateOrDuplicate).Uint64("missing", s.Missing).Uint64("rejected", s.Rejected).
+			Int("pending", s.Pending).Uint64("frames", state.frames).
+			Uint64("recoveries", state.recoveries).Bool("final", final).
+			Msg("video receive summary")
+	}
+	defer func() {
+		for receiver, state := range videoReceiveStates {
+			logVideoSummary(receiver, state, true)
+		}
+	}()
 	appDataReceivers := make(map[*participantAudioReceiver]*appDataReceiver)
 
 	var rosterGeneration uint64
@@ -855,6 +872,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
 				if _, active := activeReceivers[receiver]; active {
 					continue
 				}
+				logVideoSummary(receiver, state, true)
 				state.assembler = rtp.H264AccessUnitAssembler{}
 				recovery.forget(receiver.videoSSRC)
 				delete(videoReceiveStates, receiver)
@@ -944,7 +962,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
 		}
 		vh, vok := rtp.ParseRtpHeader(pkt)
 		if vok {
-			if rtpInspect < 20 || vh.PayloadType == rtp.RtpPayloadTypeH264 || vh.PayloadType == rtp.RtpPayloadTypeAppData {
+			if rtpInspect < 20 {
 				log.Debug().
 					Uint8("payload_type", vh.PayloadType).
 					Uint32("ssrc", vh.Ssrc).
@@ -1012,7 +1030,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
 			vh = media.Header
 			videoState := videoReceiveStates[media.receiver]
 			if videoState == nil {
-				videoState = &videoReceiveState{orientation: -1}
+				videoState = &videoReceiveState{orientation: -1, lastSummary: time.Now()}
 				videoReceiveStates[media.receiver] = videoState
 			}
 			videoReception.Observe(vh.Ssrc, vh.SequenceNumber, vh.Timestamp, uint64(time.Now().UnixMilli()), 90000)
@@ -1033,7 +1051,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
 					})
 				}
 			}
-			if videoWirePacket < videoWirePacketLimit {
+			if e.c.diag != nil && videoWirePacket < videoWirePacketLimit {
 				headerLen, _ := rtp.RtpHeaderByteLength(pkt)
 				_, extension, _ := rtp.RtpExtensionProfileAndData(pkt)
 				e.c.diag.Emit("video_wire", map[string]any{
@@ -1047,51 +1065,65 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
 				})
 			}
 			videoWirePacket++
-			frame, complete, recoveryNeeded := videoState.assembler.Push(
-				vh.SequenceNumber,
-				vh.Marker,
-				media.Payload,
-			)
-			recovery.observe(vh.Ssrc, time.Now(), complete, complete && rtp.AUHasIDR(frame), recoveryNeeded)
+			videoState.reorder.Push(rtp.VideoPacket{
+				Sequence: vh.SequenceNumber, Timestamp: vh.Timestamp, Marker: vh.Marker, Payload: media.Payload,
+			}, time.Now(), func(ordered rtp.VideoPacket) {
+				frame, complete, recoveryNeeded := videoState.assembler.Push(
+					ordered.Sequence,
+					ordered.Marker,
+					ordered.Payload,
+				)
+				recovery.observe(vh.Ssrc, time.Now(), complete, complete && rtp.AUHasIDR(frame), recoveryNeeded)
 
-			if complete {
-				if videoWireFrame < videoWireFrameLimit {
-					e.c.diag.Emit("video_wire", map[string]any{
-						"event": "access_unit", "direction": "in", "call_id": callID,
-						"frame": videoWireFrame, "ssrc": vh.Ssrc, "rtp_ts": vh.Timestamp,
-						"idr": rtp.AUHasIDR(frame), "bytes": len(frame),
-					})
+				if recoveryNeeded {
+					videoState.recoveries++
 				}
-				videoWireFrame++
-				e.c.diag.Emit("video", map[string]any{"event": "frame", "ssrc": vh.Ssrc, "bytes": len(frame)})
-				deliveredParticipantFrame := false
-				if call != nil {
-					deliveredParticipantFrame = call.dispatchParticipantVideoFrame(ParticipantVideoFrame{
-						ParticipantID: media.ParticipantID,
-						Sender:        media.UserJID,
-						Device:        media.DeviceJID,
-						PID:           media.PID,
-						HasPID:        media.HasPID,
-						SSRC:          vh.Ssrc,
-						Orientation:   videoState.orientation,
-						AccessUnit:    frame,
-					})
-				}
-				if sink := callVideoSink(call); sink != nil {
-					if err := sink.WriteVideo(frame); err != nil {
-						log.Warn().Err(err).Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("failed to write WhatsApp video frame to sink")
-					} else {
-						if videoFrameIn == 0 {
-							log.Info().Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("first WhatsApp video frame written to sink")
+				if complete {
+					videoState.frames++
+					if e.c.diag != nil && videoWireFrame < videoWireFrameLimit {
+						e.c.diag.Emit("video_wire", map[string]any{
+							"event": "access_unit", "direction": "in", "call_id": callID,
+							"frame": videoWireFrame, "ssrc": vh.Ssrc, "rtp_ts": ordered.Timestamp,
+							"idr": rtp.AUHasIDR(frame), "bytes": len(frame),
+						})
+					}
+					videoWireFrame++
+					if e.c.diag != nil {
+						e.c.diag.Emit("video", map[string]any{"event": "frame", "ssrc": vh.Ssrc, "bytes": len(frame)})
+					}
+					deliveredParticipantFrame := false
+					if call != nil {
+						deliveredParticipantFrame = call.dispatchParticipantVideoFrame(ParticipantVideoFrame{
+							ParticipantID: media.ParticipantID,
+							Sender:        media.UserJID,
+							Device:        media.DeviceJID,
+							PID:           media.PID,
+							HasPID:        media.HasPID,
+							SSRC:          vh.Ssrc,
+							Orientation:   videoState.orientation,
+							AccessUnit:    frame,
+						})
+					}
+					if sink := callVideoSink(call); sink != nil {
+						if err := sink.WriteVideo(frame); err != nil {
+							log.Warn().Err(err).Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("failed to write WhatsApp video frame to sink")
+						} else {
+							if videoFrameIn == 0 {
+								log.Info().Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("first WhatsApp video frame written to sink")
+							}
+							videoFrameIn++
 						}
-						videoFrameIn++
+					} else if !deliveredParticipantFrame {
+						if videoSinkMissing == 0 {
+							log.Warn().Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("WhatsApp video frame arrived with no sink attached")
+						}
+						videoSinkMissing++
 					}
-				} else if !deliveredParticipantFrame {
-					if videoSinkMissing == 0 {
-						log.Warn().Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("WhatsApp video frame arrived with no sink attached")
-					}
-					videoSinkMissing++
 				}
+			})
+			if now := time.Now(); now.Sub(videoState.lastSummary) >= 10*time.Second {
+				logVideoSummary(media.receiver, videoState, false)
+				videoState.lastSummary = now
 			}
 			if vidIn++; vidIn == 1 {
 				log.Info().Uint32("ssrc", vh.Ssrc).Msg("first video RTP demuxed from relay (NOT VALIDATED)")

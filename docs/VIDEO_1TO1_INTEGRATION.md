@@ -119,3 +119,45 @@ The Meowcaller runtime subset is copied under its MIT license at the same pin in
 The matching Lovable changes keep the video view within the embedded viewport, preserve history scroll, add a working microphone mute, and use compact camera controls. Transcription is processed by energy windows with original offsets; an investigation found an incorrectly timed phrase present later in the server WAV. No historical audio is trimmed or replaced.
 
 Validated: main-module CI (including real Pion data-channel control delivery), nested H.264/SRTCP and recovery race tests, and Lovable tests/typecheck/build. Remaining: a fresh 1:1 WhatsApp video test against alpha.4 and the published frontend. Automated recovery tests do not prove every real-network freeze is resolved. Video recording remains unimplemented and must be server-side when added.
+
+
+## alpha.5: RTP ordering and bounded production logging
+
+Authorized test `2026-10-01 03:41 UTC`: the last 1000 log lines contain
+993 H264 RTP packets covering only approximately six seconds. All sequence
+numbers 9509 through 10501 are present, but three arrival inversions exist:
+9984,9986,9987,9988,9985; 9995,9997,9996; and 10083,10085,10084.
+The access-unit assembler requires ordered input, but the receive loop previously
+passed arrival order directly. That converts reordering into packet loss and
+unnecessary IDR waits. This explains interruptions in this captured slice;
+it does not establish the cause of every interruption during the full call.
+
+RFC6184 section 7.1 specifies RTP sequence ordering before H264 depacketization:
+https://www.rfc-editor.org/rfc/rfc6184.html#section-7.1
+
+Authenticated video payloads now enter one `rtp.VideoReorderBuffer` per receiver
+before depacketization. Contiguous packets emit immediately. When a sequence gap
+appears, the queue waits until the missing packet arrives, its oldest queued
+packet reaches 80ms on a subsequent Push, or the queue reaches 128 payloads.
+Expired gaps are passed through to the existing IDR recovery logic. Duplicates
+and stale packets are ignored; 16-bit sequence wrap is supported. Buffered
+payloads are copied because the receive storage can be reused. Retention is
+bounded to 128 payloads of at most 1500 bytes per SSRC (187.5KiB of payload plus
+map/metadata overhead), with no extra goroutines or timers. If video arrivals
+stop entirely, the alpha.4 recovery watchdog remains responsible for recovery.
+
+Production RTP packet summaries now stop after the first 20 RTP packets per call,
+regardless of payload type. Video summaries appear at most once per ten seconds
+per active receiver plus a final summary, with call_id, SSRC, cumulative packet,
+ordering, missing, late/duplicate, rejected, frame and recovery counters.
+Optional private wire diagnostics remain opt-in. Normal video paths avoid
+constructing diagnostic frame maps when diagnostics are disabled.
+
+The regression fixture contains only sequence/timestamp/marker metadata, without
+call IDs, participant IDs or media. Its second-resolution source log cannot
+reconstruct true arrival delays; the automated ordering replay explicitly uses
+simulated 1ms intervals. Separate tests validate timeout behavior, real loss,
+fragmented interframe reconstruction, duplicate and queue bounds. Queue-only
+benchmarks with 500 independent states test bookkeeping, not full server
+concurrency. End-to-end load capacity requires CPU/RAM/network measurement with
+real audio/video calls on the target host; no capacity guarantee is inferred.
