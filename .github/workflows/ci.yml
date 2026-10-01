@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "v2/meowcaller"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -51,7 +52,9 @@ jobs:
       - name: Test
         env:
           CGO_ENABLED: "1"
-        run: go test -race -count=1 ./...
+        run: |
+          go test -race -count=1 ./...
+          go -C third_party/meowcaller test -race -count=1 ./...
 
   client:
     name: client
