@@ -13,7 +13,7 @@ jobs:
     if: contains(github.event.head_commit.message, '[alpha-release]')
     runs-on: ubuntu-latest
     env:
-      TAG: v2.0.0-alpha.2
+      TAG: v2.0.0-alpha.3
       CGO_ENABLED: "0"
 
     steps:
@@ -30,6 +30,14 @@ jobs:
         run: |
           go mod download
           go mod verify
+
+      - name: Validate server
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          test -z "$(gofmt -l cmd internal)"
+          go vet ./...
+          go test -race -count=1 ./...
 
       - name: Build linux/amd64
         env:
@@ -50,20 +58,18 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Chatspot Calls v2.0.0-alpha.2
+          name: Chatspot Calls v2.0.0-alpha.3
           prerelease: true
           draft: false
           generate_release_notes: false
           body: |
-            Segunda build de homologação da migração para Meowcaller + HyperMeow.
+            Corrige a preservação das gravações do servidor até entrega confirmada.
 
-            Esta alpha corrige a preservação de `peerPhone` nas chamadas de saída antes do primeiro deploy de homologação.
+            Falhas temporárias continuam na fila após 24 horas. Falhas definitivas ficam retidas para recuperação e não bloqueiam os demais envios. Diretórios com metadados ilegíveis também são preservados. Exclusão requer envio confirmado e processamento concluído.
 
-            Uso exclusivo para homologação no Portainer. Não substituir a produção antes de passar a matriz de paridade.
+            Publicar também o frontend Chatspot Calls com gravação exclusivamente no servidor. Não há gravação de vídeo nesta versão.
 
-            O motor VoIP manual legado foi removido desta linha v2. Permanecem a API/SSE do Chatspot Calls, sessões/QR, bridge WebRTC do navegador, peerPhone e gravação server-side com entrega final no Chatspot.
-
-            Gates antes de produção: restauração de sessão, QR, ligação de saída, ligação de entrada, accept/reject/end, áudio bidirecional, peerPhone/LID, ownership, gravação estéreo, upload/transcrição no Chatspot e recovery após restart.
+            Atualização de homologação da alpha.2; mantém o motor Meowcaller e as APIs existentes.
           files: |
             dist/wacalls-server-linux-amd64
             dist/wacalls-server-linux-amd64.sha256
