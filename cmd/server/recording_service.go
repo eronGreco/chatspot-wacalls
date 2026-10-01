@@ -271,7 +271,6 @@ func (s *recordingService) recoverJobs() error {
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -287,11 +286,27 @@ func (s *recordingService) recoverJobs() error {
 		}
 		if job.State == "recording" {
 			job.State = "queued"
-			job.EndedAt = &now
+
+			recordedMS := int64(0)
+			for _, track := range []string{"agent.pcm", "customer.pcm"} {
+				if samples, err := pcmSampleCount(filepath.Join(dir, track)); err == nil {
+					recordedMS = max(recordedMS, (samples*1000+recordingSampleRate-1)/recordingSampleRate)
+				}
+			}
+			if v, err := loadVideoJob(dir); err == nil && v.Requested {
+				recordedMS = max(recordedMS, v.DurationMS)
+			}
 			if h, err := loadMediaManifest(dir); err == nil {
-				h.close(now.UnixMilli())
+				if len(h.Segments) > 0 {
+					recordedMS = max(recordedMS, h.Segments[len(h.Segments)-1].StartMS)
+				}
+				recoveredEnd := job.ConnectedAt.Add(time.Duration(recordedMS) * time.Millisecond)
+				h.close(recoveredEnd.UnixMilli())
 				job.MediaHistory = h
 			}
+			recoveredEnd := job.ConnectedAt.Add(time.Duration(recordedMS) * time.Millisecond).UTC()
+			job.EndedAt = &recoveredEnd
+
 			job.LastError = "server restarted while call was being recorded"
 			if err := s.saveJob(dir, job); err != nil {
 				return fmt.Errorf("recover recording job %s: %w", job.CallID, err)

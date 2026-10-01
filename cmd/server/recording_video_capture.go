@@ -414,6 +414,9 @@ func (c *videoCapture) write(f capturedVideoFrame) error {
 	if f.rotation != 0 && f.rotation != 90 && f.rotation != 180 && f.rotation != 270 {
 		f.rotation = 0
 	}
+	if t.file != nil && t.epoch == f.epoch && elapsed-t.lastMS > 1000 {
+		c.partial("Interrupção no fluxo de vídeo; os intervalos sem quadros foram preservados.")
+	}
 	reset := t.file == nil || changed || t.epoch != f.epoch || t.source != f.source || t.rotation != f.rotation || elapsed-t.lastMS > 1000
 	pts := elapsed
 	if !reset && f.rate > 0 {

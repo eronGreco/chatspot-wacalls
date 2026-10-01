@@ -1,4 +1,4 @@
-# Mixed calls and server video recording (alpha.8)
+# Mixed calls and server video recording (alpha.9)
 
 ## Operational capability
 
@@ -51,7 +51,7 @@ SPS dimensions. The small journal records filenames, direction, start/end,
 orientation, capture limits and errors. File/journal sync occurs approximately
 every 2 seconds and on completion. After an interrupted capture ffprobe streams
 persisted packet timestamps to recover the last frames; restart downtime is
-never added to the recovered movie. An interrupted recording is marked partial.
+never added to the recovered movie or the recovered audio/media end time. An interrupted recording is marked partial.
 A sudden power failure can lose data not yet flushed during that interval.
 
 Capture queues contain at most 32 frames per call and 32 MiB of owned frame

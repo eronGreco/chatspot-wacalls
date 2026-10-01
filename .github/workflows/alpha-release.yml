@@ -13,7 +13,7 @@ jobs:
     if: contains(github.event.head_commit.message, '[alpha-release]')
     runs-on: ubuntu-latest
     env:
-      TAG: v2.0.0-alpha.8
+      TAG: v2.0.0-alpha.9
       CGO_ENABLED: "0"
 
     steps:
@@ -67,12 +67,14 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Chatspot Calls v2.0.0-alpha.8
+          name: Chatspot Calls v2.0.0-alpha.9
           prerelease: true
           draft: false
           generate_release_notes: false
           body: |
             Gravação e montagem de vídeo 1:1 exclusivamente no servidor.
+
+            Consolida alpha.8 e corrige o término do histórico de áudio após reinício para usar o último dado persistido, sem acrescentar downtime. Interrupções inesperadas do fluxo de vídeo são sinalizadas como gravação parcial.
 
             Captura H.264 comprimido dos dois participantes com timestamps, orientação e retomadas de câmera persistidos. Monta MP4 640x240, 10 fps, H.264 CRF 32 e áudio AAC mono 48 kbps, com proporção preservada e intervalos sem câmera em preto.
 
@@ -80,7 +82,7 @@ jobs:
 
             Envio Chatspot Type VIDEO por URL temporária, PUT binário e confirmação com fileId permanente. Originais removidos somente depois da entrega confirmada de ambos os artefatos; falhas e reinícios preservam a fila.
 
-            Requer FFmpeg com libx264/AAC na imagem e atualização Lovable para contrato de vídeo/Registros. Use a stack alpha.8 com VIDEO_RECORDING_ENABLED=1.
+            Requer FFmpeg com libx264/AAC na imagem e atualização Lovable para contrato de vídeo/Registros. Use a stack alpha.9 com VIDEO_RECORDING_ENABLED=1.
 
             Validação: vet e testes com race detector nos dois módulos; testes FFmpeg reais de montagem, sincronização, proporção, recuperação e retenção. Chamada WhatsApp real com a nova gravação ainda precisa ser validada.
           files: |
