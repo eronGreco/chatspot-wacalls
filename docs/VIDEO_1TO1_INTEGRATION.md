@@ -107,3 +107,15 @@ A investigação inicial não identificou necessidade de novo binário: usar a `
 - No backend, a gravação inicia em `CallPhaseActive`, que o pin do motor pode emitir no primeiro RTP decodificado, antes do aceite remoto. PCM anterior à criação do recorder é ignorado, e o tap customer só existe após conectar o bridge do navegador. Esses caminhos merecem inspeção, mas não provam a causa do silêncio grande relatado.
 - No site, a confirmação de gravação no servidor falhando aciona gravação local alternativa. Identificar qual arquivo foi entregue antes de mudar o relógio ou os taps.
 - Para fechar o diagnóstico de gravação, correlacionar call ID, offer/accept, primeiro RTP, recording started, conexão do browser, origem server/local e duração real do silêncio no arquivo. Não cortar silêncio nem alterar timestamps da transcrição como substituto para recuperar áudio perdido.
+
+## Receive recovery in alpha.4
+
+The first receiver changes were insufficient in the next live test: outbound camera video stayed fluent on the phone, while inbound phone video remained frozen. The frontend had no remote keyframe request path. Inspection found that the pinned RTP assembler triggers PLI only on the first packet gap; an IDR wait could therefore persist indefinitely without another request.
+
+Alpha.4 routes browser control byte `0x01` through `Bridge.OnRemoteKeyframeRequest` to `Call.RequestVideoKeyframe`. A participant-scoped recovery loop uses the existing authenticated SRTCP sender, retries PLI with a one-second minimum interval, and stops after IDR recovery or media termination. Authenticated receive SSRCs are tracked; no guessed SSRC or plaintext RTCP is used. The H.264 assembler retains SPS/PPS sent separately during recovery and includes them with a subsequent IDR. The browser also retains parameters across decoder restart and requests recovery when stalled.
+
+The Meowcaller runtime subset is copied under its MIT license at the same pin into `third_party/meowcaller`, referenced through a local Go module replace. Its README records provenance and targeted changes. CI explicitly runs nested-module regression tests, since root `go test ./...` does not traverse nested modules.
+
+The matching Lovable changes keep the video view within the embedded viewport, preserve history scroll, add a working microphone mute, and use compact camera controls. Transcription is processed by energy windows with original offsets; an investigation found an incorrectly timed phrase present later in the server WAV. No historical audio is trimmed or replaced.
+
+Validated: main-module CI (including real Pion data-channel control delivery), nested H.264/SRTCP and recovery race tests, and Lovable tests/typecheck/build. Remaining: a fresh 1:1 WhatsApp video test against alpha.4 and the published frontend. Automated recovery tests do not prove every real-network freeze is resolved. Video recording remains unimplemented and must be server-side when added.
