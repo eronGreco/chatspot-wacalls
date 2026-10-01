@@ -1,7 +1,7 @@
-// Video-call constants. The browser owns the VP8 codec (WebCodecs); the Go side
-// only packetizes the encoded frames into RTP, so these numbers are the whole
-// codec contract. They mirror the PROVISIONAL note in the server's core/types.go
-// and will be tuned once video is validated against a real WhatsApp video call.
+// Video-call constants. The browser encodes/decodes H.264 Annex-B using
+// WebCodecs. Meowcaller handles WhatsApp RTP/SRTP; the browser bridge carries
+// encoded access units in the five-byte envelope documented in
+// docs/VIDEO_1TO1_INTEGRATION.md. Settings still require real-call validation.
 
 // VIDEO_CHANNEL_LABEL must match videoChannelLabel in cmd/server/bridge.go.
 // (The label is still "vp8" for wire compatibility; the payload is now H264.)
