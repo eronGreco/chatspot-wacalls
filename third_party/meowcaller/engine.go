@@ -1175,6 +1175,10 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
 	case signaling.VideoStateDisabled, signaling.VideoStateStopped:
 		m.remoteVideo = false
 	case signaling.VideoStateUpgradeAccept:
+		// A delayed acceptance after StopVideo must not restart a cancelled camera.
+		if !m.localVideo || !m.videoGate {
+			break
+		}
 		m.localVideo = true
 		m.videoGate = false
 		announceEnabled = true

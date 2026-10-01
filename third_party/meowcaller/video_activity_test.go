@@ -115,3 +115,17 @@ func TestReceiveOnlyVideoAcceptanceDoesNotEnableLocalCamera(t *testing.T) {
 		t.Fatal("receive-only direction not preserved")
 	}
 }
+
+func TestDelayedVideoAcceptanceCannotRestartStoppedCamera(t *testing.T) {
+	e := &engine{c: &Client{log: zerolog.Nop()}, calls: map[string]*engineCall{"c": {localVideo: true, videoGate: true, remoteVideo: true}}, sendCallNode: func(context.Context, waBinary.Node) error { return nil }}
+	c := &Call{eng: e, id: "c"}
+	e.calls["c"].call = c
+	if err := c.StopVideo(); err != nil {
+		t.Fatal(err)
+	}
+	e.onVideoStanza(&waBinary.Node{Tag: "video", Attrs: waBinary.Attrs{"call-id": "c", "state": "4"}})
+	local, remote := c.VideoActivity()
+	if local || !remote {
+		t.Fatal("late acceptance restarted stopped camera or lost remote video")
+	}
+}
