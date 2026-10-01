@@ -2,7 +2,7 @@
 
 ## Estado e escopo
 
-Implementação de integração em andamento. O backend da `v2.0.0-alpha.2` já contém transporte de vídeo, mas isso não comprova vídeo ponta a ponta no WhatsApp real. A etapa atual cobre videochamadas diretas recebidas e feitas; grupos e upgrade de voz durante a chamada serão validados em etapas posteriores.
+Integração inicial implementada no Lovable. Em 30/09/2026, o usuário confirmou uma chamada de vídeo real com imagem nos dois sentidos usando a `v2.0.0-alpha.2`. Isso não valida todos os cenários: o vídeo do celular recebido no site congelou frequentemente, inclusive por cerca de 20 segundos, a webcam apareceu quadrada/achatada no celular e a gravação apresentou silêncio inicial apesar de conversa audível. A etapa atual cobre videochamadas diretas recebidas e feitas; grupos e upgrade de voz durante a chamada serão validados em etapas posteriores.
 
 Voz e gravação de áudio foram validadas pelo usuário em entrada e saída. Reconexão via QR foi relatada como funcional em 30/09/2026. Multioperador real e recuperação da fila após restart continuam pendentes.
 
@@ -98,3 +98,12 @@ Não marcar como validado antes desses testes. Teste unitário de envelope/bridg
 ## Deploy
 
 A investigação inicial não identificou necessidade de novo binário: usar a `alpha.2` existente para os primeiros testes de integração. Se a implementação exigir mudança no backend, documentar a diferença e publicar outra alpha antes de instruir qualquer alteração no Portainer. O site só deve ser publicado depois da revisão do código e dos checks.
+
+## Investigação do primeiro teste real
+
+- No site `3af63e01`, o decoder descarta deltas e espera IDR quando `decodeQueueSize > 3`. Não há pedido de keyframe remoto nesse caminho. A espera pode durar bastante; é uma falha identificada no código, mas falta diagnóstico da chamada para atribuir todos os congelamentos a ela.
+- `0x01` é controle servidor → navegador. A `alpha.2` ignora esse controle enviado no sentido oposto. Não anunciar recuperação por PLI originada no navegador sem implementar o caminho completo. O Meowcaller do pin possui recuperação por PLI para perda de RTP; isso não detecta descartes locais do decoder no site.
+- A captura pede 640×480 e usa `track.getSettings` para redimensionar. A correção deve usar metadados reais do vídeo e preservar proporção; preencher um quadro vertical com câmera horizontal exige recorte central, não esticar pixels. O layout final do telefone é controlado pelo WhatsApp, não pelo CSS do site.
+- No backend, a gravação inicia em `CallPhaseActive`, que o pin do motor pode emitir no primeiro RTP decodificado, antes do aceite remoto. PCM anterior à criação do recorder é ignorado, e o tap customer só existe após conectar o bridge do navegador. Esses caminhos merecem inspeção, mas não provam a causa do silêncio grande relatado.
+- No site, a confirmação de gravação no servidor falhando aciona gravação local alternativa. Identificar qual arquivo foi entregue antes de mudar o relógio ou os taps.
+- Para fechar o diagnóstico de gravação, correlacionar call ID, offer/accept, primeiro RTP, recording started, conexão do browser, origem server/local e duração real do silêncio no arquivo. Não cortar silêncio nem alterar timestamps da transcrição como substituto para recuperar áudio perdido.
