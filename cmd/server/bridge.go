@@ -16,7 +16,7 @@ import (
 const pcmChannelLabel = "pcm"
 
 // videoChannelLabel is the data channel the browser opens for a video call to
-// carry encoded VP8 frames (WebCodecs) in both directions, each prefixed with
+// carry encoded H.264 Annex-B access units (WebCodecs) in both directions, each prefixed with
 // media.VideoFrame's 5-byte header. Absent on audio-only calls.
 const videoChannelLabel = "vp8"
 
@@ -40,7 +40,7 @@ type Bridge struct {
 	// OnServerPCM observa o PCM recebido do peer antes de ele ser enviado ao browser.
 	// O Chatspot usa este tap para a trilha customer da gravação server-side.
 	OnServerPCM func(pcm []float32)
-	// OnBrowserVideo é chamado com cada quadro VP8 codificado, capturado da câmera do browser.
+	// OnBrowserVideo é chamado com cada quadro H.264 (Annex-B) codificado, capturado da câmera do browser.
 	OnBrowserVideo func(f media.VideoFrame)
 	// OnTerminalICE dispara quando a peer connection falha ou fecha (a menos
 	// que tenha fechado via CloseQuiet). Setado uma vez na criação do bridge,
@@ -124,7 +124,7 @@ func (b *Bridge) WritePCM(pcm []float32) error {
 	return dc.Send(media.PCMFloat32ToInt16LE(pcm))
 }
 
-// WriteVideo sends one encoded VP8 frame from the peer to the browser over the
+// WriteVideo sends one encoded H.264 Annex-B access unit from the peer to the browser over the
 // "vp8" data channel. It is a no-op until that channel is open (audio-only
 // calls never open it).
 func (b *Bridge) WriteVideo(f media.VideoFrame) error {
