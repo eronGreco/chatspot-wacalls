@@ -13,7 +13,7 @@ jobs:
     if: contains(github.event.head_commit.message, '[alpha-release]')
     runs-on: ubuntu-latest
     env:
-      TAG: v2.0.0-alpha.5
+      TAG: v2.0.0-alpha.6
       CGO_ENABLED: "0"
 
     steps:
@@ -60,22 +60,20 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Chatspot Calls v2.0.0-alpha.5
+          name: Chatspot Calls v2.0.0-alpha.6
           prerelease: true
           draft: false
           generate_release_notes: false
           body: |
-            Corrige interrupções frequentes do vídeo recebido por tratar pacotes fora de ordem como perda.
+            Prepara registros de chamadas de áudio, áudio com vídeo e mistas.
 
-            Ordena RTP autenticado por SSRC antes de montar H264, aguardando até 80ms por lacunas quando novos pacotes chegam. A fila retém no máximo 128 payloads de 1500 bytes, não cria timers ou goroutines e não acrescenta atraso ao tráfego ordenado. Perda real continua acionando a recuperação da alpha.4.
+            Adiciona timeline autoritativa por câmera local/remota, com relógio compartilhado com a gravação de áudio, snapshots SSE e manifesto persistente para recuperação da fila após reinício. Limite de 512 trechos e indicação explícita de histórico truncado.
 
-            Remove logs contínuos por pacote. Mantém amostra inicial limitada a 20 pacotes por chamada, resumos de vídeo a cada 10 segundos e resumo final com ordenações, perdas, quadros e recuperações.
+            Inclui rejeição de upgrade de vídeo e aceite opcional sem câmera local, preservando áudio e a câmera remota. Mantém as correções de RTP e logs limitados da alpha.5.
 
-            Inclui testes de reprodução dos 993 pacotes do teste autorizado, FU-A fora de ordem, perda real, duplicação, limite de memória e virada de sequência. Build, vet e testes com race detector são obrigatórios antes da publicação.
+            Gravação de vídeo ainda não habilitada: videoRecordingSupported=false. WAV, transcrição e resumo continuam no servidor e no fluxo atual. A interface Lovable requer atualização para exibir o novo histórico e operar upgrades durante a chamada.
 
-            Gravação e áudio permanecem no fluxo da alpha.4. Compatível com o Lovable já publicado; não exige nova publicação da interface.
-
-            A fluidez precisa ser confirmada em chamada real. Benchmarks da fila não representam teste de capacidade total do servidor.
+            Validação obrigatória: vet e testes completos com race detector nos dois módulos. Transições WhatsApp reais ainda precisam ser confirmadas em chamada.
           files: |
             dist/wacalls-server-linux-amd64
             dist/wacalls-server-linux-amd64.sha256

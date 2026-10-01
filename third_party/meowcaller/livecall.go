@@ -261,6 +261,17 @@ func (c *Call) IsVideo() bool {
 	return c.eng.callIsVideo(c.id)
 }
 
+// VideoActivity reports negotiated video directions atomically, excluding a
+// pending outbound upgrade. No packet-gap or orientation event changes this state.
+func (c *Call) VideoActivity() (local, remote bool) {
+	c.eng.mu.Lock()
+	defer c.eng.mu.Unlock()
+	if m := c.eng.calls[c.id]; m != nil {
+		return m.localVideo && !m.videoGate, m.remoteVideo
+	}
+	return false, false
+}
+
 // IsSendingVideo reports whether this client currently owns an active or pending
 // outbound video flow.
 func (c *Call) IsSendingVideo() bool {
@@ -292,6 +303,11 @@ func (c *Call) StartVideo() error {
 // independent outbound video state.
 func (c *Call) AcceptVideo() error {
 	return c.eng.transitionVideo(c.id, signaling.VideoStateUpgradeAccept)
+}
+
+// RejectVideo declines a pending peer upgrade without changing either active camera.
+func (c *Call) RejectVideo() error {
+	return c.eng.transitionVideo(c.id, signaling.VideoStateUpgradeReject)
 }
 
 // StopVideo stops this client's outbound video while preserving peer video and audio.

@@ -105,9 +105,11 @@ func (s *recordingService) processJob(dir string, job *recordingJob) error {
 		Error string `json:"error"`
 	}
 	if err := s.postJSON("done", map[string]any{
-		"callId": job.CallID,
-		"lines":  lines,
-		"error":  nilIfEmpty(job.TranscriptError),
+		"callId":                  job.CallID,
+		"lines":                   lines,
+		"error":                   nilIfEmpty(job.TranscriptError),
+		"mediaHistory":            job.MediaHistory,
+		"videoRecordingSupported": false,
 	}, &doneResp); err != nil {
 		return err
 	}

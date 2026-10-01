@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -31,6 +32,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/video/start", s.handleVideoStart)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/video/stop", s.handleVideoStop)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/video/accept", s.handleVideoAccept)
+	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/video/reject", s.handleVideoReject)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/accept", s.handleAccept)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/reject", s.handleReject)
 	mux.HandleFunc("DELETE /api/sessions/{sid}/calls/{id}", s.handleEndCall)
@@ -117,7 +119,7 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"maxCallsPerSession": s.sessions.maxCalls})
+	writeJSON(w, http.StatusOK, map[string]any{"maxCallsPerSession": s.sessions.maxCalls, "mediaHistoryVersion": 1, "mixedCalls": true, "videoRecordingSupported": false, "recordingClock": "server_connected"})
 }
 
 func (s *server) handleCallsCount(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +214,12 @@ func (s *server) handleVideoStop(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleVideoAccept(w http.ResponseWriter, r *http.Request) {
 	if sess := s.sessionByID(w, r.PathValue("sid")); sess != nil {
 		s.doVideoAccept(sess, w, r)
+	}
+}
+
+func (s *server) handleVideoReject(w http.ResponseWriter, r *http.Request) {
+	if sess := s.sessionByID(w, r.PathValue("sid")); sess != nil {
+		s.doVideoReject(sess, w, r)
 	}
 }
 
@@ -457,7 +465,7 @@ func (s *server) doCallGet(sess *Session, w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": rec.CallID, "sid": rec.SessionID, "peer": rec.Peer,
-		"state": callStateForAPI(rec.Status), "direction": direction,
+		"state": callStateForAPI(rec.Status), "direction": direction, "media": rec.Media, "mediaHistory": rec.MediaHistory,
 	})
 }
 
@@ -568,7 +576,7 @@ func (s *server) doVideoStart(sess *Session, w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.broker.setCallMedia(id, "video")
+	sess.syncCallMedia(ac.call)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -590,7 +598,7 @@ func (s *server) doVideoStop(sess *Session, w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.broker.setCallMedia(id, "audio")
+	sess.syncCallMedia(ac.call)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -613,27 +621,47 @@ func (s *server) doVideoAccept(sess *Session, w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such call"})
 		return
 	}
-	// A ordem importa. AcceptVideo() só libera RECEBER o vídeo do peer —
-	// "without changing this client's independent outbound video state" (doc
-	// do meowcaller) — mas por baixo (engine.go:transitionVideo, caso
-	// VideoStateUpgradeAccept), se o NOSSO vídeo ainda não estiver ativo
-	// (m.localVideo == false) ele manda um <video state="stopped"> pro peer
-	// ANTES do aceite, "confirmando" que não vamos mandar vídeo. Como o
-	// aceite na nossa UI reabre a câmera e manda quadros de verdade (ver
-	// upgradeConnectionToVideo no frontend), StartVideo() PRECISA rodar
-	// primeiro — assim m.localVideo já está true quando AcceptVideo() lê o
-	// estado, e aquele "stopped" espúrio nunca é mandado. Na ordem errada
-	// (Accept depois Start), o "stopped" chegava bem na hora que devíamos
-	// estar pedindo pra ligar, e o vídeo nunca saía de verdade pro WhatsApp.
-	if err := ac.call.StartVideo(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	// Empty body preserves the existing camera-on behavior. Explicit false
+	// accepts receive-only video without starting this client's camera.
+	var body struct {
+		SendVideo *bool `json:"sendVideo"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body); err != nil && err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid video acceptance body"})
 		return
+	}
+	sendVideo := body.SendVideo == nil || *body.SendVideo
+	if sendVideo {
+		// Start before Accept avoids announcing our camera as stopped.
+		if err := ac.call.StartVideo(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	if err := ac.call.AcceptVideo(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.broker.setCallMedia(id, "video")
+	sess.syncCallMedia(ac.call)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *server) doVideoReject(sess *Session, w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !s.callOwnerAllows(id, clientID(r)) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "call claimed by another client"})
+		return
+	}
+	ac, ok := sess.reg.get(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such call"})
+		return
+	}
+	if err := ac.call.RejectVideo(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	sess.syncCallMedia(ac.call)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

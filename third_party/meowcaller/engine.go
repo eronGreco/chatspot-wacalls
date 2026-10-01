@@ -269,7 +269,7 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 	case signaling.VideoStateUpgradeRequestV2:
 		m.localVideo = true
 		m.videoGate = true
-	case signaling.VideoStateUpgradeAccept:
+	case signaling.VideoStateUpgradeAccept, signaling.VideoStateUpgradeReject:
 		if !m.peerVideoUpgrade {
 			e.mu.Unlock()
 			return errors.New("meowcaller: no pending peer video upgrade")
@@ -314,6 +314,8 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 		if err == nil {
 			err = send(transition, signaling.VideoDecAccept, nil)
 		}
+	case signaling.VideoStateUpgradeReject:
+		err = send(transition, "", nil)
 	case signaling.VideoStateStopped:
 		orientation := 0
 		err = send(transition, "", &orientation)
@@ -325,7 +327,7 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 	e.mu.Lock()
 	var currentSender *videoSender
 	if current := e.calls[callID]; current == m {
-		if transition == signaling.VideoStateUpgradeAccept {
+		if transition == signaling.VideoStateUpgradeAccept || transition == signaling.VideoStateUpgradeReject {
 			current.peerVideoUpgrade = true
 		} else {
 			current.localVideo = false

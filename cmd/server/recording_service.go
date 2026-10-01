@@ -37,26 +37,27 @@ type transcriptLine struct {
 }
 
 type recordingJob struct {
-	Version           int              `json:"version"`
-	CallID            string           `json:"callId"`
-	ConnectedAt       time.Time        `json:"connectedAt"`
-	EndedAt           *time.Time       `json:"endedAt,omitempty"`
-	State             string           `json:"state"`
-	Name              string           `json:"name,omitempty"`
-	MimeType          string           `json:"mimeType,omitempty"`
-	Size              int64            `json:"size,omitempty"`
-	TotalSamples      int64            `json:"totalSamples,omitempty"`
-	Confirmed         bool             `json:"confirmed,omitempty"`
-	FileID            string           `json:"fileId,omitempty"`
-	AgentOffset       int64            `json:"agentOffsetSamples,omitempty"`
-	CustomerOffset    int64            `json:"customerOffsetSamples,omitempty"`
-	Lines             []transcriptLine `json:"lines,omitempty"`
-	TranscriptionDone bool             `json:"transcriptionDone,omitempty"`
-	TranscriptError   string           `json:"transcriptError,omitempty"`
-	Attempts          int              `json:"attempts,omitempty"`
-	FirstFailureAt    *time.Time       `json:"firstFailureAt,omitempty"`
-	NextAttemptAt     *time.Time       `json:"nextAttemptAt,omitempty"`
-	LastError         string           `json:"lastError,omitempty"`
+	Version           int               `json:"version"`
+	CallID            string            `json:"callId"`
+	MediaHistory      *CallMediaHistory `json:"mediaHistory,omitempty"`
+	ConnectedAt       time.Time         `json:"connectedAt"`
+	EndedAt           *time.Time        `json:"endedAt,omitempty"`
+	State             string            `json:"state"`
+	Name              string            `json:"name,omitempty"`
+	MimeType          string            `json:"mimeType,omitempty"`
+	Size              int64             `json:"size,omitempty"`
+	TotalSamples      int64             `json:"totalSamples,omitempty"`
+	Confirmed         bool              `json:"confirmed,omitempty"`
+	FileID            string            `json:"fileId,omitempty"`
+	AgentOffset       int64             `json:"agentOffsetSamples,omitempty"`
+	CustomerOffset    int64             `json:"customerOffsetSamples,omitempty"`
+	Lines             []transcriptLine  `json:"lines,omitempty"`
+	TranscriptionDone bool              `json:"transcriptionDone,omitempty"`
+	TranscriptError   string            `json:"transcriptError,omitempty"`
+	Attempts          int               `json:"attempts,omitempty"`
+	FirstFailureAt    *time.Time        `json:"firstFailureAt,omitempty"`
+	NextAttemptAt     *time.Time        `json:"nextAttemptAt,omitempty"`
+	LastError         string            `json:"lastError,omitempty"`
 }
 
 type recordingService struct {
@@ -213,6 +214,10 @@ func (s *recordingService) finish(callID string) {
 	}
 	now := time.Now().UTC()
 	job.EndedAt = &now
+	if h, err := loadMediaManifest(rec.dir); err == nil {
+		h.close(now.UnixMilli())
+		job.MediaHistory = h
+	}
 	job.State = "queued"
 	job.NextAttemptAt = nil
 	if err := s.saveJob(rec.dir, job); err != nil {
@@ -252,6 +257,10 @@ func (s *recordingService) recoverJobs() error {
 		if job.State == "recording" {
 			job.State = "queued"
 			job.EndedAt = &now
+			if h, err := loadMediaManifest(dir); err == nil {
+				h.close(now.UnixMilli())
+				job.MediaHistory = h
+			}
 			job.LastError = "server restarted while call was being recorded"
 			if err := s.saveJob(dir, job); err != nil {
 				return fmt.Errorf("recover recording job %s: %w", job.CallID, err)

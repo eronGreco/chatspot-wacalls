@@ -129,6 +129,8 @@ func (s *Session) wireCall(c *meowcaller.Call, direction, peerPhone string, extr
 			SessionID: s.id, CallID: callID, Direction: direction, Peer: c.Peer().String(), PeerPhone: peerPhone,
 			Media: mediaKind(c.IsVideo()), StartedAt: time.Now().UnixMilli(), Status: status,
 		}
+		r.localVideo, r.remoteVideo = c.VideoActivity()
+		r.Media = mediaKind(r.localVideo || r.remoteVideo)
 		if existing != nil {
 			r.Owner = existing.Owner
 			r.StartedAt = existing.StartedAt
@@ -140,8 +142,21 @@ func (s *Session) wireCall(c *meowcaller.Call, direction, peerPhone string, extr
 	}
 
 	c.OnStateChange(func(p meowcaller.CallPhase) {
-		if p == meowcaller.CallPhaseActive && s.mgr.recordings != nil {
-			s.mgr.recordings.start(callID, time.Now())
+		if p == meowcaller.CallPhaseActive {
+			r := rec(StatusConnected)
+			connectedAt := time.Now()
+			now := connectedAt.UnixMilli()
+			r.connectedAt = &now
+			s.mgr.broker.upsertCall(r)
+			snapshot, _ := s.mgr.broker.getCall(callID)
+			if snapshot != nil && snapshot.MediaHistory != nil {
+				if snapshot.MediaHistory.ConnectedAt != now {
+					connectedAt = time.UnixMilli(snapshot.MediaHistory.ConnectedAt)
+				}
+				s.mgr.recordings.start(callID, connectedAt)
+				s.mgr.recordings.observeMedia(callID, snapshot.MediaHistory)
+			}
+			return
 		}
 		if p == meowcaller.CallPhaseEnded {
 			s.removeCall(callID)
@@ -175,7 +190,9 @@ func (s *Session) wireCall(c *meowcaller.Call, direction, peerPhone string, extr
 		// Só emite o evento (o frontend decide se mostra uma notificação de
 		// aceitar/recusar) — não aceita sozinho. Ver doVideoAccept em
 		// httpapi.go pro aceite explícito.
-		s.mgr.broker.emitPeerVideoState(s.id, callID, v.Active, v.Upgrade, v.Orientation)
+		s.syncCallMedia(c)
+		local, remote := c.VideoActivity()
+		s.mgr.broker.emitPeerVideoState(s.id, callID, v.Active, v.Upgrade, v.Orientation, v.Raw, local, remote)
 	})
 }
 
@@ -315,6 +332,11 @@ func (s *Session) setBridge(callID string, b *Bridge) {
 
 func (s *Session) removeCall(callID string) {
 	if s.mgr.recordings != nil {
+		if rec, ok := s.mgr.broker.getCall(callID); ok && rec.MediaHistory != nil {
+			h := rec.MediaHistory.clone()
+			h.close(time.Now().UnixMilli())
+			s.mgr.recordings.observeMedia(callID, h)
+		}
 		s.mgr.recordings.finish(callID)
 	}
 	ac, ok := s.reg.remove(callID)

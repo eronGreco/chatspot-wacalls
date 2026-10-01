@@ -19,17 +19,20 @@ const (
 )
 
 type CallRecord struct {
-	SessionID string     `json:"sessionId"`
-	CallID    string     `json:"callId"`
-	Owner     *string    `json:"owner"`
-	Direction string     `json:"direction"`
-	Peer      string     `json:"peer"`
-	PeerPhone string     `json:"peerPhone,omitempty"`
-	Media     string     `json:"media,omitempty"` // "audio" (default) or "video"
-	StartedAt int64      `json:"startedAt"`
-	Status    CallStatus `json:"status"`
-	EndedAt   *int64     `json:"endedAt,omitempty"`
-	EndReason string     `json:"endReason,omitempty"`
+	SessionID               string            `json:"sessionId"`
+	CallID                  string            `json:"callId"`
+	Owner                   *string           `json:"owner"`
+	Direction               string            `json:"direction"`
+	Peer                    string            `json:"peer"`
+	PeerPhone               string            `json:"peerPhone,omitempty"`
+	Media                   string            `json:"media,omitempty"` // current mode; history classifies the entire call
+	MediaHistory            *CallMediaHistory `json:"mediaHistory,omitempty"`
+	connectedAt             *int64
+	localVideo, remoteVideo bool
+	StartedAt               int64      `json:"startedAt"`
+	Status                  CallStatus `json:"status"`
+	EndedAt                 *int64     `json:"endedAt,omitempty"`
+	EndReason               string     `json:"endReason,omitempty"`
 }
 
 type AuthSnapshot struct {
@@ -117,12 +120,25 @@ func (b *Broker) emitSessionQR(sessionID, qr string) {
 func (b *Broker) upsertCall(r CallRecord) {
 	b.mu.Lock()
 	cp := r
+	if prev := b.calls[r.CallID]; prev != nil {
+		cp.MediaHistory = prev.MediaHistory.clone()
+		if prev.connectedAt != nil {
+			cp.connectedAt = prev.connectedAt
+		}
+	}
+	if cp.Status == StatusConnected && cp.MediaHistory == nil {
+		at := time.Now().UnixMilli()
+		if cp.connectedAt != nil {
+			at = *cp.connectedAt
+		}
+		cp.MediaHistory = newMediaHistory(at, cp.localVideo, cp.remoteVideo)
+	}
 	b.calls[r.CallID] = &cp
 	b.mu.Unlock()
 	b.broadcastCallList()
 	b.broadcast(map[string]any{
 		"type": "call-status", "sessionId": r.SessionID, "id": r.CallID, "owner": r.Owner,
-		"status": r.Status, "peer": r.Peer, "peerPhone": r.PeerPhone, "media": r.Media, "startedAt": r.StartedAt,
+		"status": r.Status, "peer": r.Peer, "peerPhone": r.PeerPhone, "media": cp.Media, "startedAt": cp.StartedAt, "mediaHistory": cp.MediaHistory,
 	})
 }
 
@@ -142,22 +158,9 @@ func (b *Broker) setStatus(id string, status CallStatus) (CallRecord, bool) {
 	b.broadcastCallList()
 	b.broadcast(map[string]any{
 		"type": "call-status", "sessionId": cp.SessionID, "id": cp.CallID, "owner": cp.Owner,
-		"status": cp.Status, "peer": cp.Peer, "peerPhone": cp.PeerPhone, "media": cp.Media, "startedAt": cp.StartedAt,
+		"status": cp.Status, "peer": cp.Peer, "peerPhone": cp.PeerPhone, "media": cp.Media, "startedAt": cp.StartedAt, "mediaHistory": cp.MediaHistory,
 	})
 	return cp, true
-}
-
-// setCallMedia atualiza só o campo Media de um registro existente e
-// retransmite via SSE (call-status), sem mexer no resto do registro — usado
-// pelo upgrade/downgrade de vídeo (tanto o nosso quanto o aceite automático
-// de um upgrade pedido pelo peer) pra refletir na UI sem exigir um novo GET.
-func (b *Broker) setCallMedia(callID, kind string) {
-	rec, ok := b.getCall(callID)
-	if !ok {
-		return
-	}
-	rec.Media = kind
-	b.upsertCall(*rec)
 }
 
 func (b *Broker) getCall(id string) (*CallRecord, bool) {
@@ -168,6 +171,7 @@ func (b *Broker) getCall(id string) (*CallRecord, bool) {
 		return nil, false
 	}
 	cp := *c
+	cp.MediaHistory = c.MediaHistory.clone()
 	return &cp, true
 }
 
@@ -252,6 +256,8 @@ func (b *Broker) endCall(id, reason string) {
 	c.Status = StatusEnded
 	c.EndedAt = &now
 	c.EndReason = reason
+	c.MediaHistory = c.MediaHistory.clone()
+	c.MediaHistory.close(now)
 	ended := *c
 	delete(b.calls, id)
 	b.history = append(b.history, ended)
@@ -262,7 +268,7 @@ func (b *Broker) endCall(id, reason string) {
 	b.mu.Unlock()
 	b.broadcast(map[string]any{
 		"type": "call-ended", "sessionId": sessionID, "id": id, "owner": owner,
-		"peer": peer, "peerPhone": peerPhone, "reason": reason, "endReason": reason, "endedAt": now,
+		"peer": peer, "peerPhone": peerPhone, "reason": reason, "endReason": reason, "endedAt": now, "media": ended.Media, "mediaHistory": ended.MediaHistory,
 	})
 	b.broadcastCallList()
 }
@@ -314,10 +320,10 @@ func (b *Broker) emitHandRaise(sessionID, callID, participant string, raised boo
 // emitPeerVideoState transmite uma mudança no estado de vídeo do peer (câmera
 // ligada/desligada, ou um upgrade de áudio pra vídeo pedido por ele) — vem de
 // um stanza <video> recebido no meio da chamada.
-func (b *Broker) emitPeerVideoState(sessionID, callID string, active, upgrade bool, orientation int) {
+func (b *Broker) emitPeerVideoState(sessionID, callID string, active, upgrade bool, orientation, raw int, localVideo, remoteVideo bool) {
 	b.broadcast(map[string]any{
 		"type": "call-peer-video", "sessionId": sessionID, "id": callID,
-		"active": active, "upgrade": upgrade, "orientation": orientation,
+		"active": active, "upgrade": upgrade, "orientation": orientation, "raw": raw, "localVideo": localVideo, "remoteVideo": remoteVideo,
 	})
 }
 
