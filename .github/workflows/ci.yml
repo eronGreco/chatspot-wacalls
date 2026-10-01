@@ -52,7 +52,9 @@ jobs:
       - name: Test
         env:
           CGO_ENABLED: "1"
-        run: go test -race -count=1 ./...
+        run: |
+          go test -race -count=1 ./...
+          go -C third_party/meowcaller test -race -count=1 ./...
 
   client:
     name: client

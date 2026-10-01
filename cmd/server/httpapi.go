@@ -495,6 +495,11 @@ func (s *server) doWebRTC(sess *Session, w http.ResponseWriter, r *http.Request)
 	bridge.OnBrowserVideo = func(f media.VideoFrame) {
 		_ = ac.call.SendVideo(f.Data)
 	}
+	bridge.OnRemoteKeyframeRequest = func() {
+		if err := ac.call.RequestVideoKeyframe(); err != nil {
+			s.log.Debug("remote video recovery unavailable", "call_id", callID, "err", err)
+		}
+	}
 	bridge.OnTerminalICE = func() {
 		go sess.terminateCall(callID, "user_ended")
 	}

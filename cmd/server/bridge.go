@@ -41,7 +41,8 @@ type Bridge struct {
 	// O Chatspot usa este tap para a trilha customer da gravação server-side.
 	OnServerPCM func(pcm []float32)
 	// OnBrowserVideo é chamado com cada quadro H.264 (Annex-B) codificado, capturado da câmera do browser.
-	OnBrowserVideo func(f media.VideoFrame)
+	OnBrowserVideo          func(f media.VideoFrame)
+	OnRemoteKeyframeRequest func()
 	// OnTerminalICE dispara quando a peer connection falha ou fecha (a menos
 	// que tenha fechado via CloseQuiet). Setado uma vez na criação do bridge,
 	// antes dele ser exposto a qualquer outra goroutine — nunca é alterado
@@ -68,8 +69,14 @@ func NewBridge(offerSDP string, log *slog.Logger) (*Bridge, string, error) {
 		case videoChannelLabel:
 			br.videoDC.Store(dc)
 			dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+				if media.IsVideoKeyframeRequest(msg.Data) {
+					if cb := br.OnRemoteKeyframeRequest; cb != nil {
+						cb()
+					}
+					return
+				}
 				cb := br.OnBrowserVideo
-				if cb == nil || media.IsVideoKeyframeRequest(msg.Data) {
+				if cb == nil {
 					return
 				}
 				if f, ok := media.DecodeVideoFrame(msg.Data); ok {

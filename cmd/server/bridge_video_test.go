@@ -49,6 +49,8 @@ func TestBridgeVideoRoundtrip(t *testing.T) {
 	}
 	defer br.Close()
 	br.OnBrowserVideo = func(f media.VideoFrame) { fromBrowser <- f }
+	remoteRequest := make(chan struct{}, 1)
+	br.OnRemoteKeyframeRequest = func() { remoteRequest <- struct{}{} }
 
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: answer}); err != nil {
 		t.Fatalf("browser SetRemoteDescription: %v", err)
@@ -64,6 +66,7 @@ func TestBridgeVideoRoundtrip(t *testing.T) {
 	})
 	vdc.OnOpen(func() {
 		_ = vdc.Send(media.EncodeVideoFrame(want))
+		_ = vdc.Send(media.VideoKeyframeRequestMsg())
 	})
 
 	select {
@@ -73,6 +76,17 @@ func TestBridgeVideoRoundtrip(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for OnBrowserVideo")
+	}
+
+	select {
+	case <-remoteRequest:
+	case <-time.After(10 * time.Second):
+		t.Fatal("browser recovery request did not reach the remote-keyframe callback")
+	}
+	select {
+	case <-fromBrowser:
+		t.Fatal("control request must not be decoded as a video frame")
+	default:
 	}
 
 	// bridge -> browser
