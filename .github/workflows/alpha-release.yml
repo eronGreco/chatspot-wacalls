@@ -13,7 +13,7 @@ jobs:
     if: contains(github.event.head_commit.message, '[alpha-release]')
     runs-on: ubuntu-latest
     env:
-      TAG: v2.0.0-alpha.3
+      TAG: v2.0.0-alpha.4
       CGO_ENABLED: "0"
 
     steps:
@@ -35,8 +35,9 @@ jobs:
         env:
           CGO_ENABLED: "1"
         run: |
-          test -z "$(gofmt -l cmd internal)"
+          test -z "$(gofmt -l cmd internal third_party)"
           go vet ./...
+          go -C third_party/meowcaller vet ./...
           go test -race -count=1 ./...
           go -C third_party/meowcaller test -race -count=1 ./...
 
@@ -59,18 +60,22 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Chatspot Calls v2.0.0-alpha.3
+          name: Chatspot Calls v2.0.0-alpha.4
           prerelease: true
           draft: false
           generate_release_notes: false
           body: |
-            Corrige a preservação das gravações do servidor até entrega confirmada.
+            Corrige a recuperação do vídeo recebido do celular em chamadas 1:1.
 
-            Falhas temporárias continuam na fila após 24 horas. Falhas definitivas ficam retidas para recuperação e não bloqueiam os demais envios. Diretórios com metadados ilegíveis também são preservados. Exclusão requer envio confirmado e processamento concluído.
+            O navegador pode solicitar um novo quadro completo através do servidor. O servidor envia PLI/SRTCP autenticado e repete com intervalo controlado até receber IDR, preservando SPS/PPS necessários ao decoder. Os timers encerram junto com a mídia.
 
-            Publicar também o frontend Chatspot Calls com gravação exclusivamente no servidor. Não há gravação de vídeo nesta versão.
+            Meowcaller permanece baseado no pin c48c3e2a243c672c942cbf0c941d14161720d540, com fonte MIT local e alterações específicas de recuperação. Não altera codecs de áudio ou sinalização da chamada.
 
-            Atualização de homologação da alpha.2; mantém o motor Meowcaller e as APIs existentes.
+            Inclui a preservação das gravações até confirmação de entrega da alpha.3. A gravação de vídeo ainda não foi implementada.
+
+            Publicar também o Lovable atualizado: receptor com recuperação, tela compacta com mute e transcrição por trechos com tempo original.
+
+            Validado por build, vet, testes de bridge, H264, SRTCP e concorrência. Nova chamada real ainda é necessária.
           files: |
             dist/wacalls-server-linux-amd64
             dist/wacalls-server-linux-amd64.sha256
