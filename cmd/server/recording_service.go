@@ -246,10 +246,7 @@ func (s *recordingService) recoverJobs() error {
 		dir := filepath.Join(s.cfg.RootDir, entry.Name())
 		job, err := s.loadJob(dir)
 		if err != nil {
-			st, statErr := entry.Info()
-			if statErr == nil && now.Sub(st.ModTime()) > 48*time.Hour {
-				_ = os.RemoveAll(dir)
-			}
+			s.log.Error("unreadable recording job retained for recovery", "directory", dir, "err", err)
 			continue
 		}
 		if job.State == "recording" {
@@ -294,6 +291,10 @@ func (s *recordingService) processOneDue() {
 		return
 	}
 
+	if !job.Confirmed || job.State != "done" {
+		s.handleJobError(dir, job, permanentError{fmt.Errorf("refusing to remove recording without confirmed delivery")})
+		return
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		s.log.Warn("remove completed recording directory failed", "call_id", job.CallID, "err", err)
 		return
@@ -319,7 +320,7 @@ func (s *recordingService) nextDueJob() (string, *recordingJob, error) {
 		}
 		dir := filepath.Join(s.cfg.RootDir, entry.Name())
 		job, err := s.loadJob(dir)
-		if err != nil || job.State == "recording" {
+		if err != nil || job.State == "recording" || job.State == "failed" {
 			continue
 		}
 		if job.NextAttemptAt != nil && job.NextAttemptAt.After(now) {
@@ -344,7 +345,12 @@ func (s *recordingService) handleJobError(dir string, job *recordingJob, err err
 	if errors.As(err, &p) {
 		s.log.Error("recording delivery permanently failed", "call_id", job.CallID, "err", p.err)
 		s.notifyFailed(job.CallID, p.Error())
-		_ = os.RemoveAll(dir)
+		job.State = "failed"
+		job.LastError = p.Error()
+		job.NextAttemptAt = nil
+		if saveErr := s.saveJob(dir, job); saveErr != nil {
+			s.log.Error("persist retained failed recording job failed", "call_id", job.CallID, "err", saveErr)
+		}
 		s.signal()
 		return
 	}
@@ -352,13 +358,6 @@ func (s *recordingService) handleJobError(dir string, job *recordingJob, err err
 	now := time.Now().UTC()
 	if job.FirstFailureAt == nil {
 		job.FirstFailureAt = &now
-	}
-	if now.Sub(*job.FirstFailureAt) >= 24*time.Hour {
-		s.log.Error("recording delivery expired after 24h", "call_id", job.CallID, "err", err)
-		s.notifyFailed(job.CallID, err.Error())
-		_ = os.RemoveAll(dir)
-		s.signal()
-		return
 	}
 
 	job.Attempts++
