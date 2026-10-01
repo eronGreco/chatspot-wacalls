@@ -255,7 +255,14 @@ func (w *tailWriter) Write(b []byte) (int, error) {
 	return n, nil
 }
 func runVideoCommand(ctx context.Context, binary string, args ...string) error {
-	cmd := exec.CommandContext(ctx, binary, args...)
+	command := binary
+	commandArgs := args
+	// Lower background encoder priority where nice is available (including Alpine).
+	if nice, err := exec.LookPath("nice"); err == nil {
+		command = nice
+		commandArgs = append([]string{"-n", "10", binary}, args...)
+	}
+	cmd := exec.CommandContext(ctx, command, commandArgs...)
 	var tail tailWriter
 	cmd.Stderr = &tail
 	cmd.Stdout = io.Discard
@@ -317,7 +324,7 @@ func (s *recordingService) assembleVideo(dir string, j *videoJob, output string)
 		return err
 	}
 	args := ffVideoArgs()
-	args = append(args, "-f", "concat", "-safe", "1", "-i", agent, "-f", "concat", "-safe", "1", "-i", customer, "-i", filepath.Join(work, "mix.wav"), "-filter_complex", "[0:v]setpts=PTS-STARTPTS[a];[1:v]setpts=PTS-STARTPTS[b];[a][b]hstack=inputs=2[v];[2:a]pan=mono|c0=0.5*c0+0.5*c1,apad[audio]", "-map", "[v]", "-map", "[audio]", "-t", videoSeconds(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32", "-maxrate", "192k", "-bufsize", "384k", "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-g", "20", "-threads", "1", "-r", "10", "-c:a", "aac", "-b:a", "48k", "-ar", "16000", "-ac", "1", "-movflags", "+faststart", "-f", "mp4", output+".tmp")
+	args = append(args, "-f", "concat", "-safe", "1", "-i", agent, "-f", "concat", "-safe", "1", "-threads", "1", "-i", customer, "-threads", "1", "-i", filepath.Join(work, "mix.wav"), "-filter_complex", "[0:v]setpts=PTS-STARTPTS[a];[1:v]setpts=PTS-STARTPTS[b];[a][b]hstack=inputs=2[v];[2:a]pan=mono|c0=0.5*c0+0.5*c1,apad[audio]", "-map", "[v]", "-map", "[audio]", "-t", videoSeconds(duration), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32", "-maxrate", "192k", "-bufsize", "384k", "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-g", "20", "-threads", "1", "-r", "10", "-c:a", "aac", "-b:a", "48k", "-ar", "16000", "-ac", "1", "-movflags", "+faststart", "-f", "mp4", output+".tmp")
 	if err := runVideoCommand(ctx, s.cfg.Video.FFmpeg, args...); err != nil {
 		return err
 	}

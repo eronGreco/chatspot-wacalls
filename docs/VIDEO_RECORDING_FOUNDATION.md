@@ -1,4 +1,4 @@
-# Mixed calls and server video recording (alpha.9)
+# Mixed calls and server video recording (alpha.10)
 
 ## Operational capability
 
@@ -65,7 +65,8 @@ mixed calls upgrading later work through the same recorder.
 ## Compact composition and resource limits
 
 After hangup a separate video worker processes ONE call at a time. FFmpeg
-uses one decoder/encoder/filter thread per stage, with bounded stderr and a
+uses one decoder/encoder/filter thread per stream/stage and reduced process
+priority when `nice` is available, with bounded stderr and a
 processing deadline. Segments are normalized sequentially, including rotation,
 proportion-preserving scale/pad and timing; there is no unbounded filter graph
 or simultaneous decoder per camera toggle. Temporary clips are rebuilt on
