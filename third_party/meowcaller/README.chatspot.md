@@ -5,6 +5,7 @@ Production source copied from `purpshell/meowcaller` commit `c48c3e2a243c672c942
 Chatspot changes:
 - authenticated remote keyframe requests exposed as `Call.RequestVideoKeyframe`;
 - bounded, participant-scoped retry of SRTCP PLI while waiting for IDR or after video stalls;
+- preserve SPS/PPS parameter sets received separately while the H.264 assembler awaits an IDR;
 - browser requests now reach this remote recovery path through the bridge;
 - recovery ticker stops both on call context cancellation and media-loop exit.
 
