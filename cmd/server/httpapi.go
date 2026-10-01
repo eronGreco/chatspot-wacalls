@@ -119,7 +119,7 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"maxCallsPerSession": s.sessions.maxCalls, "mediaHistoryVersion": 1, "mixedCalls": true, "videoRecordingSupported": false, "recordingClock": "server_connected"})
+	writeJSON(w, http.StatusOK, map[string]any{"maxCallsPerSession": s.sessions.maxCalls, "mediaHistoryVersion": 1, "mixedCalls": true, "videoRecordingSupported": s.sessions.recordings.videoSupported(), "recordingClock": "server_connected"})
 }
 
 func (s *server) handleCallsCount(w http.ResponseWriter, r *http.Request) {
@@ -501,6 +501,10 @@ func (s *server) doWebRTC(sess *Session, w http.ResponseWriter, r *http.Request)
 		ac.src.push(pcm)
 	}
 	bridge.OnBrowserVideo = func(f media.VideoFrame) {
+		local, _ := ac.call.VideoActivity()
+		if local {
+			s.sessions.recordings.captureVideo(callID, 0, f.Data, f.TimestampMS, 1000, 0, f.Rotation)
+		}
 		_ = ac.call.SendVideo(f.Data)
 	}
 	bridge.OnRemoteKeyframeRequest = func() {

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,6 +29,7 @@ type recordingConfig struct {
 	RootDir string
 	BaseURL string
 	Secret  string
+	Video   videoRecordingConfig
 }
 
 type transcriptLine struct {
@@ -66,9 +68,15 @@ type recordingService struct {
 	log        *slog.Logger
 	httpClient *http.Client
 
-	mu     sync.Mutex
-	active map[string]*callRecorder
-	wake   chan struct{}
+	mu            sync.Mutex
+	active        map[string]*callRecorder
+	wake          chan struct{}
+	videoWake     chan struct{}
+	videoMemory   atomic.Int64
+	videoCaptures atomic.Int64
+	videoDiskMu   sync.Mutex
+	videoDiskErr  error
+	cleanupMu     sync.Mutex
 }
 
 func recordingConfigFromEnv(dbPath string) recordingConfig {
@@ -85,7 +93,7 @@ func recordingConfigFromEnv(dbPath string) recordingConfig {
 	// used by the relay. Keep a single source of truth to avoid mismatched
 	// credentials between the two services.
 	secret := os.Getenv("WACALLS_PASSWORD")
-	return recordingConfig{Enabled: enabled, RootDir: root, BaseURL: baseURL, Secret: secret}
+	return recordingConfig{Enabled: enabled, RootDir: root, BaseURL: baseURL, Secret: secret, Video: videoConfigFromEnv()}
 }
 
 func envBool(name string) bool {
@@ -112,6 +120,9 @@ func newRecordingService(ctx context.Context, cfg recordingConfig, log *slog.Log
 		return nil, fmt.Errorf("create recording root: %w", err)
 	}
 
+	if err := validateVideoConfig(&cfg.Video); err != nil {
+		return nil, err
+	}
 	s := &recordingService{
 		ctx:        ctx,
 		cfg:        cfg,
@@ -119,11 +130,17 @@ func newRecordingService(ctx context.Context, cfg recordingConfig, log *slog.Log
 		httpClient: &http.Client{Timeout: 15 * time.Minute},
 		active:     map[string]*callRecorder{},
 		wake:       make(chan struct{}, 1),
+		videoWake:  make(chan struct{}, 1),
 	}
 	if err := s.recoverJobs(); err != nil {
 		return nil, err
 	}
 	go s.worker()
+	go s.videoWorker()
+	if s.videoSupported() {
+		s.refreshVideoDisk()
+		go s.videoDiskWorker()
+	}
 	s.signal()
 	s.log.Info("server-side call recording enabled", "dir", cfg.RootDir, "target", cfg.BaseURL)
 	return s, nil
@@ -155,6 +172,10 @@ func (s *recordingService) start(callID string, connectedAt time.Time) {
 		s.mu.Unlock()
 		s.log.Error("persist recording job failed", "call_id", callID, "err", err)
 		return
+	}
+	if err := s.startVideo(rec); err != nil {
+		s.log.Error("start video capture failed", "call_id", callID, "err", err)
+		_ = saveVideoJob(rec.dir, &videoJob{Version: 1, CallID: callID, ConnectedAt: connectedAt.UTC(), State: "unavailable", CaptureError: err.Error()})
 	}
 	s.active[callID] = rec
 	s.mu.Unlock()
@@ -204,6 +225,9 @@ func (s *recordingService) finish(callID string) {
 	if rec == nil {
 		return
 	}
+	if rec.video != nil {
+		rec.video.close()
+	}
 	if err := rec.close(); err != nil {
 		s.log.Warn("close recording tracks failed", "call_id", callID, "err", err)
 	}
@@ -233,6 +257,10 @@ func (s *recordingService) signal() {
 		return
 	}
 	select {
+	case s.videoWake <- struct{}{}:
+	default:
+	}
+	select {
 	case s.wake <- struct{}{}:
 	default:
 	}
@@ -254,6 +282,9 @@ func (s *recordingService) recoverJobs() error {
 			s.log.Error("unreadable recording job retained for recovery", "directory", dir, "err", err)
 			continue
 		}
+		if err := s.recoverVideoJob(dir); err != nil {
+			s.log.Error("recover video job failed", "directory", dir, "err", err)
+		}
 		if job.State == "recording" {
 			job.State = "queued"
 			job.EndedAt = &now
@@ -266,6 +297,7 @@ func (s *recordingService) recoverJobs() error {
 				return fmt.Errorf("recover recording job %s: %w", job.CallID, err)
 			}
 		}
+		s.cleanupRecording(dir)
 	}
 	return nil
 }
@@ -304,11 +336,7 @@ func (s *recordingService) processOneDue() {
 		s.handleJobError(dir, job, permanentError{fmt.Errorf("refusing to remove recording without confirmed delivery")})
 		return
 	}
-	if err := os.RemoveAll(dir); err != nil {
-		s.log.Warn("remove completed recording directory failed", "call_id", job.CallID, "err", err)
-		return
-	}
-	s.log.Info("recording delivered and local audio removed", "call_id", job.CallID, "file_id", job.FileID)
+	s.cleanupRecording(dir)
 	s.signal()
 }
 
@@ -330,6 +358,10 @@ func (s *recordingService) nextDueJob() (string, *recordingJob, error) {
 		dir := filepath.Join(s.cfg.RootDir, entry.Name())
 		job, err := s.loadJob(dir)
 		if err != nil || job.State == "recording" || job.State == "failed" {
+			continue
+		}
+		if job.State == "done" {
+			s.cleanupRecording(dir)
 			continue
 		}
 		if job.NextAttemptAt != nil && job.NextAttemptAt.After(now) {

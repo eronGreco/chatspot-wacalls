@@ -1105,7 +1105,13 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
 						})
 					}
 					if sink := callVideoSink(call); sink != nil {
-						if err := sink.WriteVideo(frame); err != nil {
+						var writeErr error
+						if timed, ok := sink.(TimedVideoSink); ok {
+							writeErr = timed.WriteTimedVideo(frame, ordered.Timestamp, vh.Ssrc)
+						} else {
+							writeErr = sink.WriteVideo(frame)
+						}
+						if err := writeErr; err != nil {
 							log.Warn().Err(err).Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("failed to write WhatsApp video frame to sink")
 						} else {
 							if videoFrameIn == 0 {

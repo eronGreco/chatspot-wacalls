@@ -175,12 +175,15 @@ func (s *recordingService) observeMedia(id string, h *CallMediaHistory) {
 	if rec == nil {
 		return
 	}
+	if rec.video != nil {
+		rec.video.setMedia(h)
+	}
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	if rec.closed {
 		return
 	}
-	if err := saveMediaManifest(rec.dir, h); err != nil {
+	if err := saveMediaManifest(rec.dir, h, s.videoSupported()); err != nil {
 		s.log.Error("persist media timeline failed", "call_id", id, "err", err)
 	}
 }
@@ -194,8 +197,12 @@ type RecordingMediaManifest struct {
 	MediaHistory            *CallMediaHistory `json:"mediaHistory"`
 }
 
-func saveMediaManifest(dir string, h *CallMediaHistory) error {
+func saveMediaManifest(dir string, h *CallMediaHistory, videoSupported ...bool) error {
 	manifest := RecordingMediaManifest{Version: 1, Clock: "server_connected", AudioSampleRate: recordingSampleRate, VideoRecordingStatus: "unavailable", MediaHistory: h}
+	if len(videoSupported) > 0 && videoSupported[0] {
+		manifest.VideoRecordingSupported = true
+		manifest.VideoRecordingStatus = "recording"
+	}
 	body, err := json.Marshal(manifest)
 	if err != nil {
 		return err

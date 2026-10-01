@@ -120,6 +120,9 @@ func (s *Session) wireCall(c *meowcaller.Call, direction, peerPhone string, extr
 	// primeiro pacote antes do doWebRTC terminar a negociação WebRTC (ver
 	// orientedVideoSink em bridge.go).
 	videoSink := newOrientedVideoSink()
+	videoSink.onVideo = func(au []byte, timestamp, ssrc uint32, rotation uint16) {
+		s.mgr.recordings.captureVideo(callID, 1, au, timestamp, 90000, ssrc, rotation)
+	}
 	s.reg.add(callID, &activeCall{call: c, src: src, videoSink: videoSink})
 	c.ReceiveVideo(videoSink)
 
@@ -155,6 +158,14 @@ func (s *Session) wireCall(c *meowcaller.Call, direction, peerPhone string, extr
 				}
 				s.mgr.recordings.start(callID, connectedAt)
 				s.mgr.recordings.observeMedia(callID, snapshot.MediaHistory)
+				if s.mgr.recordings.videoSupported() {
+					go func() {
+						_ = c.RequestVideoKeyframe()
+						if b, ok := s.reg.bridge(callID); ok {
+							_ = b.RequestKeyframe()
+						}
+					}()
+				}
 			}
 			return
 		}

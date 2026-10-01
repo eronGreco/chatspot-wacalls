@@ -212,6 +212,7 @@ func (b *Bridge) CloseQuiet() {
 type orientedVideoSink struct {
 	bridge      atomic.Pointer[Bridge]
 	videoStart  time.Time
+	onVideo     func([]byte, uint32, uint32, uint16)
 	orientation atomic.Int32 // código CVO 0-3, ver rotationDegrees
 }
 
@@ -227,6 +228,13 @@ func (s *orientedVideoSink) attachBridge(b *Bridge) {
 }
 
 // WriteVideo consome um access unit H.264 do peer (meowcaller.VideoSink).
+func (s *orientedVideoSink) WriteTimedVideo(au []byte, timestamp, ssrc uint32) error {
+	if s.onVideo != nil {
+		s.onVideo(au, timestamp, ssrc, rotationDegrees(int(s.orientation.Load())))
+	}
+	return s.WriteVideo(au)
+}
+
 func (s *orientedVideoSink) WriteVideo(au []byte) error {
 	b := s.bridge.Load()
 	if b == nil {

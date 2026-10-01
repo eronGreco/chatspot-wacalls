@@ -26,6 +26,12 @@ type VideoSink interface {
 	Close() error
 }
 
+// TimedVideoSink preserves the authenticated RTP presentation clock for server
+// recorders. Existing VideoSink implementations continue to receive WriteVideo.
+type TimedVideoSink interface {
+	WriteTimedVideo(accessUnit []byte, timestamp, ssrc uint32) error
+}
+
 // VideoOrientationSink receives display orientation discovered in RTP frame metadata.
 // The value is clockwise quarter turns suitable for rendering the decoded frame upright.
 type VideoOrientationSink interface {

@@ -89,7 +89,7 @@ func TestRecordingCleanupRequiresConfirmedDelivery(t *testing.T) {
 			if err := os.Mkdir(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			job := &recordingJob{CallID: "CALL", State: "done", Confirmed: confirmed}
+			job := &recordingJob{CallID: "CALL", State: "done", Confirmed: confirmed, FileID: "file-1"}
 			s := &recordingService{ctx: context.Background(), cfg: recordingConfig{RootDir: root, BaseURL: endpoint.URL}, log: slog.New(slog.NewTextHandler(io.Discard, nil)), httpClient: endpoint.Client(), wake: make(chan struct{}, 1)}
 			if err := s.saveJob(dir, job); err != nil {
 				t.Fatal(err)

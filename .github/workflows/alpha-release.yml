@@ -13,7 +13,7 @@ jobs:
     if: contains(github.event.head_commit.message, '[alpha-release]')
     runs-on: ubuntu-latest
     env:
-      TAG: v2.0.0-alpha.7
+      TAG: v2.0.0-alpha.8
       CGO_ENABLED: "0"
 
     steps:
@@ -31,9 +31,16 @@ jobs:
           go mod download
           go mod verify
 
+      - name: Install video recording codecs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version
+
       - name: Validate server
         env:
           CGO_ENABLED: "1"
+          REQUIRE_VIDEO_FFMPEG: "1"
         run: |
           test -z "$(gofmt -l cmd internal third_party)"
           go vet ./...
@@ -60,22 +67,22 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Chatspot Calls v2.0.0-alpha.7
+          name: Chatspot Calls v2.0.0-alpha.8
           prerelease: true
           draft: false
           generate_release_notes: false
           body: |
-            Prepara registros de chamadas de áudio, áudio com vídeo e mistas.
+            Gravação e montagem de vídeo 1:1 exclusivamente no servidor.
 
-            Adiciona timeline autoritativa por câmera local/remota, com relógio compartilhado com a gravação de áudio, snapshots SSE e manifesto persistente para recuperação da fila após reinício. Limite de 512 trechos e indicação explícita de histórico truncado.
+            Captura H.264 comprimido dos dois participantes com timestamps, orientação e retomadas de câmera persistidos. Monta MP4 640x240, 10 fps, H.264 CRF 32 e áudio AAC mono 48 kbps, com proporção preservada e intervalos sem câmera em preto.
 
-            Ignora aceite tardio de upgrade após desligar a câmera local, sem afetar vídeo remoto.
+            Fila de vídeo independente de WAV/transcrição/resumo. Uma montagem por vez, FFmpeg com um thread por etapa, fila de captura limitada a 32 MB, proteção de disco e limites de duração/tamanho/simultaneidade. Logs sem quadros individuais.
 
-            Inclui rejeição de upgrade de vídeo e aceite opcional sem câmera local, preservando áudio e a câmera remota. Mantém as correções de RTP e logs limitados da alpha.5.
+            Envio Chatspot Type VIDEO por URL temporária, PUT binário e confirmação com fileId permanente. Originais removidos somente depois da entrega confirmada de ambos os artefatos; falhas e reinícios preservam a fila.
 
-            Gravação de vídeo ainda não habilitada: videoRecordingSupported=false. WAV, transcrição e resumo continuam no servidor e no fluxo atual. A interface Lovable requer atualização para exibir o novo histórico e operar upgrades durante a chamada.
+            Requer FFmpeg com libx264/AAC na imagem e atualização Lovable para contrato de vídeo/Registros. Use a stack alpha.8 com VIDEO_RECORDING_ENABLED=1.
 
-            Validação obrigatória: vet e testes completos com race detector nos dois módulos. Transições WhatsApp reais ainda precisam ser confirmadas em chamada.
+            Validação: vet e testes com race detector nos dois módulos; testes FFmpeg reais de montagem, sincronização, proporção, recuperação e retenção. Chamada WhatsApp real com a nova gravação ainda precisa ser validada.
           files: |
             dist/wacalls-server-linux-amd64
             dist/wacalls-server-linux-amd64.sha256
