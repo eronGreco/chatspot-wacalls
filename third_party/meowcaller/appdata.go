@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/purpshell/meowcaller/rtp"
 	"github.com/polymorfa/hypermeow/types"
+	"github.com/purpshell/meowcaller/rtp"
 	"google.golang.org/protobuf/encoding/protowire"
 )
 

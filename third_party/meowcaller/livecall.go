@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/purpshell/meowcaller/signaling"
 	"github.com/polymorfa/hypermeow/types"
+	"github.com/purpshell/meowcaller/signaling"
 )
 
 // Call is one live direct or group call. A direct call may become an ad-hoc group

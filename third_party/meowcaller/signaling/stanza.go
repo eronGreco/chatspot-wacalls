@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"strconv"
 
-	"github.com/rs/zerolog"
 	waBinary "github.com/polymorfa/hypermeow/binary"
 	"github.com/polymorfa/hypermeow/types"
+	"github.com/rs/zerolog"
 )
 
 // Outbound call-signaling builders (offer/accept/preaccept/transport/relaylatency/

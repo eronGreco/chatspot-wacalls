@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/purpshell/meowcaller/signaling"
 	waBinary "github.com/polymorfa/hypermeow/binary"
 	"github.com/polymorfa/hypermeow/types"
+	"github.com/purpshell/meowcaller/signaling"
 )
 
 func (e *engine) placeGroupCall(

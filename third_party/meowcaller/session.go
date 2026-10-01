@@ -4,8 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/rs/zerolog"
 	"github.com/polymorfa/hypermeow/types"
+	"github.com/rs/zerolog"
 
 	"github.com/purpshell/meowcaller/rtp"
 	"github.com/purpshell/meowcaller/srtp"
