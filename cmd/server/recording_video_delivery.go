@@ -376,13 +376,15 @@ func (s *recordingService) normalizeVideoTrack(ctx context.Context, dir, work st
 			}
 			args = append(args, "-i", filepath.Join(dir, seg.File))
 			rotate := ""
+			// Match the live receiver: WhatsApp CVO is corrected by -rotation.
+			// Rotating 90/270 in the opposite direction inverts only that track.
 			switch seg.Rotation {
 			case 90:
-				rotate = "transpose=clock,"
+				rotate = "transpose=cclock,"
 			case 180:
 				rotate = "hflip,vflip,"
 			case 270:
-				rotate = "transpose=cclock,"
+				rotate = "transpose=clock,"
 			}
 			args = append(args, "-vf", rotate+"setpts=PTS-STARTPTS,fps=10:start_time=0,scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2:black,setsar=1,tpad=stop_mode=clone:stop_duration=0.1")
 		}
