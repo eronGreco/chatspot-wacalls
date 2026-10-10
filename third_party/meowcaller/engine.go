@@ -296,7 +296,6 @@ func (e *engine) transitionVideoWithCamera(callID string, transition int, sendVi
 		e.mu.Unlock()
 		return fmt.Errorf("meowcaller: unsupported local video transition %d", transition)
 	}
-	e.mu.Unlock()
 	if sender != nil {
 		if transition == signaling.VideoStateStopped {
 			sender.disable()
@@ -304,6 +303,7 @@ func (e *engine) transitionVideoWithCamera(callID string, transition int, sendVi
 			sender.enable(true)
 		}
 	}
+	e.mu.Unlock()
 
 	build := func(state int, dec string, orientation *int) waBinary.Node {
 		return signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
@@ -361,10 +361,10 @@ func (e *engine) transitionVideoWithCamera(callID string, transition int, sendVi
 			currentSender = current.videoTx
 		}
 	}
-	e.mu.Unlock()
 	if currentSender != nil {
 		currentSender.disable()
 	}
+	e.mu.Unlock()
 	return err
 }
 
@@ -388,7 +388,6 @@ func (e *engine) setVideoEnabledForRevision(callID string, enabled bool, expecte
 	m.localVideo = enabled
 	m.videoGate = enabled // Hold frames until the camera-on announcement succeeds.
 	to, creator, sender := m.from, m.creator, m.videoTx
-	e.mu.Unlock()
 
 	if sender != nil {
 		if enabled {
@@ -397,6 +396,7 @@ func (e *engine) setVideoEnabledForRevision(callID string, enabled bool, expecte
 			sender.disable()
 		}
 	}
+	e.mu.Unlock()
 	state, dec := signaling.VideoStateDisabled, ""
 	if enabled {
 		state, dec = signaling.VideoStateEnabled, signaling.VideoStateDecH264
