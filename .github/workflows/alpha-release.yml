@@ -13,7 +13,7 @@ jobs:
     if: contains(github.event.head_commit.message, '[alpha-release]')
     runs-on: ubuntu-latest
     env:
-      TAG: v2.0.0-alpha.10
+      TAG: v2.0.0-alpha.11
       CGO_ENABLED: "0"
 
     steps:
@@ -67,26 +67,22 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: Chatspot Calls v2.0.0-alpha.10
+          name: Chatspot Calls v2.0.0-alpha.11
           prerelease: true
           draft: false
           generate_release_notes: false
           body: |
-            Gravação e montagem de vídeo 1:1 exclusivamente no servidor.
+            Correções de vídeo em chamadas que começaram por áudio e da orientação da gravação do cliente.
 
-            Consolida alpha.8/alpha.9 e corrige o término do histórico de áudio após reinício para usar o último dado persistido, sem acrescentar downtime. Interrupções inesperadas do fluxo de vídeo são sinalizadas como gravação parcial.
+            Aceitar vídeo com câmera envia o aceite e anuncia H.264 sem criar outro pedido cruzado que bloqueie o envio do agente. Religar a câmera após negociação concluída não solicita um novo upgrade. Recebimento sem câmera continua disponível; falhas de sinalização podem ser recuperadas e respostas tardias não desfazem um desligamento de câmera.
 
-            Captura H.264 comprimido dos dois participantes com timestamps, orientação e retomadas de câmera persistidos. Monta MP4 640x240, 10 fps, H.264 CRF 32 e áudio AAC mono 48 kbps, com proporção preservada e intervalos sem câmera em preto.
+            A montagem MP4 passa a usar a mesma orientação da imagem ao vivo para 90° e 270°, preservando 0°/180° e a câmera do agente. Gravações antigas não são reprocessadas.
 
-            Fila de vídeo independente de WAV/transcrição/resumo. Uma montagem por vez, FFmpeg com um thread por etapa, fila de captura limitada a 32 MB, proteção de disco e limites de duração/tamanho/simultaneidade. Logs sem quadros individuais.
+            Validação: testes de protocolo para ambos os iniciadores, recebimento sem câmera, retomada, falhas e cancelamento; vet e testes com detector de concorrência nos dois módulos; teste FFmpeg de gravação nas quatro orientações.
 
-            Envio Chatspot Type VIDEO por URL temporária, PUT binário e confirmação com fileId permanente. Originais removidos somente depois da entrega confirmada de ambos os artefatos; falhas e reinícios preservam a fila.
+            Requer FFmpeg com libx264/AAC e a atualização correspondente da interface no Lovable. Preserve o volume /data, as configurações de gravação e as sessões existentes na atualização. Os arquivos desta release são para Linux amd64.
 
-            Restringe também o decoder da segunda câmera e executa a montagem com prioridade reduzida quando nice está disponível.
-
-            Requer FFmpeg com libx264/AAC na imagem e atualização Lovable para contrato de vídeo/Registros. Use a stack alpha.10 com VIDEO_RECORDING_ENABLED=1.
-
-            Validação: vet e testes com race detector nos dois módulos; testes FFmpeg reais de montagem, sincronização, proporção, recuperação e retenção. Chamada WhatsApp real com a nova gravação ainda precisa ser validada.
+            A instalação no Portainer e a validação de uma chamada real entre dois aparelhos ainda precisam ser feitas.
           files: |
             dist/wacalls-server-linux-amd64
             dist/wacalls-server-linux-amd64.sha256
