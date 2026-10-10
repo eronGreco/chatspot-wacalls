@@ -50,6 +50,9 @@ func TestRecordingRecoveryQueuesInterruptedCall(t *testing.T) {
 	if recovered.EndedAt == nil {
 		t.Fatal("recovered recording should have an endedAt")
 	}
+	if recovered.EndedAt.Sub(recovered.ConnectedAt) > time.Millisecond {
+		t.Fatal("recovery added server downtime to recorded duration")
+	}
 	if recovered.LastError == "" {
 		t.Fatal("recovery should explain that the server restarted")
 	}

@@ -1,271 +1,261 @@
 <div align="center">
 
-# 📞 Chatspot WaCalls
+# 📞 Chatspot Calls Engine
 
-**WaCalls adapted for Chatspot Calls.**
-Native WhatsApp voice calls in pure Go, with Chatspot-specific compatibility fixes for phone identification and call lifecycle handling.
+**Backend de chamadas WhatsApp para navegador, construído em Go sobre Meowcaller + HyperMeow.**
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
-[![whatsmeow](https://img.shields.io/badge/whatsmeow-VoIP-25D366?logo=whatsapp&logoColor=white)](https://github.com/tulir/whatsmeow)
-[![pion](https://img.shields.io/badge/pion-WebRTC-FF6B6B)](https://github.com/pion/webrtc)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
-
-[Chatspot changes](#what-changed-in-this-fork) · [Upstream](#upstream) · [Overview](#overview) · [Architecture](#architecture) · [Quick Start](#quick-start) · [API](#api)
+[![Meowcaller](https://img.shields.io/badge/Meowcaller-VoIP-25D366?logo=whatsapp&logoColor=white)](https://github.com/purpshell/meowcaller)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 </div>
 
 ---
 
-> [!NOTE]
-> This repository is a **Chatspot-oriented fork** of [JotaDev66/WaCalls](https://github.com/JotaDev66/WaCalls). The native VoIP stack and the original WaCalls architecture are preserved. This fork adds only the compatibility changes required by Chatspot Calls.
+## O que é
 
-## What changed in this fork
+Este repositório é um fork do [WaCalls](https://github.com/JotaDev66/WaCalls) usado como base para o backend do **Chatspot Calls**.
 
-Compared with the upstream WaCalls release used as the base, this repository adds:
+Na arquitetura v2, o servidor **não mantém mais um motor próprio do protocolo de chamadas do WhatsApp**. Sinalização, MLow, RTP/SRTP, relay, vídeo e recursos multiparte ficam a cargo do [Meowcaller](https://github.com/purpshell/meowcaller), atualmente sobre [HyperMeow](https://github.com/polymorfa/hypermeow).
 
-- **Real phone resolution for inbound calls:** resolves WhatsApp LID identifiers to the actual phone number when `caller_pn` is available or the local LID mapping already knows the association.
-- **`peerPhone` in the server payloads:** exposes the resolved phone number alongside the original WhatsApp `peer` identifier in call status, incoming-call events, claimed calls, ended calls, active-call listings and call history.
-- **Outbound phone preservation:** keeps `peerPhone` available for outgoing calls as well, making it easier for Chatspot to associate a WhatsApp call with the correct contact.
-- **Linked-device ringing fix:** when an outbound call ends before the media connection is established, the terminate signal is propagated so other linked WhatsApp devices stop ringing.
-- **Regression coverage:** includes tests for the Chatspot-specific `peerPhone` behavior and call history payloads.
+O código deste projeto fica responsável pela camada de aplicação:
 
-These changes do **not** change the existing SQLite database format or the WhatsApp pairing/session data.
-
-Implementation notes are also kept in [`CHATSPOT_PATCHES.md`](./CHATSPOT_PATCHES.md).
-
-## Upstream
-
-The original project is [**JotaDev66/WaCalls**](https://github.com/JotaDev66/WaCalls). This fork intentionally keeps the upstream architecture, license and contributor credits while maintaining a small Chatspot-specific compatibility layer.
-
----
-
-## Overview
-
-WaCalls pairs one or more WhatsApp accounts via **QR code** and lets you **place and
-receive 1:1 voice calls** from any browser on the LAN. The browser microphone is sent
-as **raw 16 kHz PCM over a WebRTC data channel** to the Go server, which encodes it with
-Meta's **MLow** codec and injects the media into WhatsApp's **SRTP relay** mesh — and the
-reverse path brings the peer's audio back to the browser.
-
-The entire VoIP stack runs **natively in pure Go**: the MLow voice codec, **RTP/SRTP**
-packetization, **STUN**, the **WebRTC/SCTP relay** transport and the `<call>` signaling,
-integrated with [**whatsmeow**](https://github.com/tulir/whatsmeow) and served to a
-**React 19** client. There is **no cgo and no native DLL** — the MLow codec is a vendored
-pure-Go package, so a plain `go build` produces a self-contained binary with live audio.
-
-Multiple WhatsApp accounts can be paired and operated side by side, each with its own
-pairing QR, connection status, and history. A single account can also run **several
-concurrent 1:1 calls** at once — one per browser operator — routed independently by call ID.
-
-> **Status:** stable. Outgoing and incoming 1:1 calls reach `ACTIVE` with bidirectional
-> audio, and a single account can hold several of them concurrently. Sessions persist in
-> `wacalls.db` (pure-Go SQLite).
-
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                          BROWSER (React client)                            │
-│   mic + speaker  ·  WebRTC data channel (16 kHz PCM)  ·  HTTP + SSE         │
-└───────────────────────────────┬──────────────────────────────────────────┘
-                                 │  POST /api/sessions/{sid}/calls/{id}/webrtc  (SDP)
-                                 │  GET  /api/events                            (SSE)
-                                 ▼
-┌──────────────────────────── GO SERVER (cmd/server) ────────────────────────┐
-│  SessionManager   registry of accounts (client + CallManager + bridge)     │
-│  Broker           SSE hub (sessions, auth, call lifecycle fan-out)          │
-│  Bridge           pion WebRTC bridge (16 kHz PCM data channel ⇄ call core)  │
-│                                                                            │
-│  internal/wa      VoipSocket adapter over whatsmeow                        │
-│  internal/voip    call · signaling · media · transport · core · wanode     │
-└───────────────┬──────────────────────────────────────┬────────────────────┘
-                │ <call> signaling (Signal/USync)       │ SRTP media
-                ▼                                        ▼
-        ┌───────────────┐                    ┌──────────────────────┐
-        │  WhatsApp WS  │                    │   WhatsApp relay      │
-        │  (whatsmeow)  │                    │  (SRTP over SCTP/DC)  │
-        └───────────────┘                    └──────────────────────┘
+```text
+Browser / Chatspot Calls
+        │
+        │ HTTP + SSE + WebRTC local
+        ▼
+┌────────────────────────────────────┐
+│ Chatspot Calls Engine              │
+│                                    │
+│ sessões + QR                       │
+│ API HTTP / SSE                     │
+│ ownership de chamadas              │
+│ bridge Browser ↔ backend           │
+│ peerPhone / identidade             │
+│ gravação e entrega resiliente      │
+└─────────────────┬──────────────────┘
+                  │
+                  ▼
+             Meowcaller
+                  │
+                  ▼
+              HyperMeow
+                  │
+                  ▼
+               WhatsApp
 ```
 
-### Layout
+## Estado da v2
 
-| Path | Responsibility |
-|---|---|
-| `cmd/server` | HTTP/SSE broker, session manager + store, WebRTC bridge, process lifecycle |
-| `internal/wa` | `VoipSocket` — sends/receives `<call>` stanzas via whatsmeow |
-| `internal/voip/core` | Domain types, constants, the `VoipSocket` interface |
-| `internal/voip/wanode` | Shared WhatsApp-node and JID helpers |
-| `internal/voip/media` | MLow codec (vendored pure-Go `mlow/`), RTP, SRTP, SSRC, PCM helpers, key derivation |
-| `internal/voip/transport` | SCTP relay, STUN, subscription encoding |
-| `internal/voip/signaling` | `<call>` stanza build/parse, call-key crypto, relay-ack parsing |
-| `internal/voip/call` | `CallManager` — orchestrates a single call end to end |
-| `client/` | React 19 + Vite + Tailwind v4 + shadcn/ui (dialer, call cards, sessions, history) |
+A branch `v2/meowcaller` está em desenvolvimento e **ainda não substitui a versão de teste atual**.
 
----
+Os testes automatizados validam compilação, vet, formatação, race tests, TypeScript e build do cliente. A validação real contra WhatsApp e Chatspot ainda é obrigatória antes do merge.
 
-## How a call flows
+Objetivo imediato: alcançar paridade com o fluxo de áudio que já funciona hoje antes de ativar funcionalidades novas.
 
-The core is `internal/voip/call.CallManager`, which drives a call end to end. Outgoing
-call sequence:
+### Paridade que precisa funcionar
 
+- criar/restaurar sessões;
+- QR code e pareamento;
+- chamada 1:1 de entrada e saída;
+- áudio bidirecional;
+- aceitar, rejeitar e encerrar;
+- ownership por operador;
+- telefone real em `peerPhone`, sem converter LID em telefone falso;
+- gravação server-side;
+- WAV estéreo com atendente e cliente separados;
+- fila persistente e recovery após restart;
+- upload final no Chatspot;
+- transcrição, resumo e nota privada pelo Chatspot Calls.
+
+## Recursos do novo motor
+
+A base Meowcaller usada pela v2 já oferece primitivas para:
+
+- chamada de áudio 1:1;
+- videochamada 1:1;
+- upgrade áudio ↔ vídeo durante a chamada;
+- adicionar participante a uma chamada existente;
+- chamadas vinculadas a grupos do WhatsApp;
+- reações;
+- mão levantada;
+- vídeo multiparte e outros recursos experimentais.
+
+**Chamadas em grupo continuam marcadas como experimentais no Meowcaller e não são tratadas aqui como estáveis sem teste real.**
+
+## Por que não manter o antigo motor WaCalls em paralelo?
+
+A v2 removeu a implementação manual anterior de:
+
+- signaling `<call>`;
+- CallManager próprio;
+- MLow próprio;
+- RTP/SRTP/RTCP próprios;
+- transport/relay próprio;
+- helpers de JID específicos do motor antigo.
+
+Manter dois motores teria aumentado duplicação, risco de divergência e custo de manutenção.
+
+Restaram em `internal/voip/media` somente pequenos helpers genéricos de PCM e envelope de frames usados na ponte com o navegador. Eles não implementam o protocolo de chamadas do WhatsApp.
+
+## Gravação server-side
+
+A gravação do Chatspot Calls não depende do browser como armazenamento final.
+
+Durante a chamada:
+
+```text
+atendente ──► agent.pcm
+cliente   ──► customer.pcm
+                  │
+                  ▼
+          alinhamento temporal
+                  │
+                  ▼
+          WAV estéreo 16 kHz
+       L = atendente / R = cliente
+                  │
+                  ▼
+           fila persistente
+                  │
+                  ▼
+             Chatspot Calls
+                  │
+                  ▼
+       arquivo definitivo no Chatspot
+       + transcrição + resumo + nota
 ```
-1. POST .../calls            → CallManager.StartCall(peerJid)
-                               generates a callID, builds the <call> offer, sends it
 
-2. Browser opens WebRTC      → POST .../calls/{id}/webrtc (SDP offer)
-                               the bridge answers with an SDP answer (pion)
+O servidor mantém o áudio apenas enquanto precisa entregá-lo. A fila sobrevive a restart e o áudio local só é removido depois da conclusão da entrega.
 
-3. Peer accepts              → events.CallAccept → HandleCallAccept
-                               server receives <relay> + hop-by-hop keys
+A integração é opcional e fica desligada quando `RECORDING_ENABLED` não está habilitado.
 
-4. Relay transport           → STUN binding/allocate on WhatsApp relays
-                               ICE + DTLS + SCTP DataChannel connect (pion)
+Variáveis usadas pela integração:
 
-5. SRTP media flowing        → state goes ACTIVE
-   ├── uplink   (you → peer): browser 16 kHz PCM (data channel) → MLow encode → SRTP → relay
-   └── downlink (peer → you): relay → SRTP → MLow decode → 16 kHz PCM (data channel) → browser
-
-6. Teardown                  → DELETE .../calls/{id} or events.CallTerminate
-                               CallManager.EndCall + bridge cleanup
+```text
+RECORDING_ENABLED
+CHATSPOT_CALLS_URL
+WACALLS_PASSWORD
+RECORDING_DIR (opcional)
 ```
 
-Each protocol step (hop-by-hop SRTP key derivation, RTP packetization at `PT=120`/16 kHz,
-STUN relay registration, relay-ack and `<call>` stanza parsing) is implemented and covered
-by tests in `internal/voip` (`go test ./...`).
+Nenhum valor secreto deve ser commitado no repositório.
 
----
+## API de compatibilidade
 
-## Requirements
+O objetivo da v2 é manter a fronteira que o Chatspot Calls já consome, por exemplo:
 
-- **Go 1.26+**
-- **Node 22+** and **npm** (only to build/run the React client)
+```text
+GET    /api/sessions
+POST   /api/sessions
+POST   /api/sessions/{sid}/pair
+DELETE /api/sessions/{sid}
 
-No C compiler, cgo, or native libraries are required — the MLow codec is vendored
-pure Go (`internal/voip/media/mlow`).
+POST   /api/sessions/{sid}/calls
+POST   /api/sessions/{sid}/calls/{id}/webrtc
+POST   /api/sessions/{sid}/calls/{id}/accept
+POST   /api/sessions/{sid}/calls/{id}/reject
+DELETE /api/sessions/{sid}/calls/{id}
 
----
+GET    /api/events?clientId=...
+```
 
-## Quick Start
+Recursos novos são aditivos; o frontend não precisa conhecer a implementação interna Meowcaller/HyperMeow.
+
+## Identidade: `peer` e `peerPhone`
+
+Uma chamada pode chegar com um identificador técnico como:
+
+```text
+123456789012345@lid
+```
+
+Esse valor **não é um número de telefone**.
+
+O backend mantém:
+
+```json
+{
+  "peer": "123456789012345@lid",
+  "peerPhone": "5537999999999"
+}
+```
+
+Quando o telefone real não puder ser resolvido, `peerPhone` fica vazio. Consumidores nunca devem extrair os dígitos do LID e tratá-los como telefone.
+
+## Desenvolvimento
+
+Requisitos:
+
+- Go 1.26+
+- Node 22+
+- npm
 
 ```bash
-# clone and enter the project
-git clone https://github.com/eronGreco/chatspot-wacalls.git
-cd chatspot-wacalls
-
-# Go dependencies
 go mod download
+cd client && npm ci && cd ..
 
-# React client dependencies
-cd client && npm install && cd ..
+go run ./cmd/server -addr :8080
 ```
 
-### Run
-
-```bash
-go run ./cmd/server -addr :8080          # add -debug for verbose logs
-```
-
-Live audio works out of the box — the MLow codec is pure Go, so a plain build
-includes it. No build tags, no `CGO_ENABLED`, no DLLs.
-
-Open `http://localhost:8080`, click **New session**, and scan the QR shown in the browser
-(it is also printed in the terminal) with **WhatsApp → Linked devices**. Add more accounts
-the same way and switch between them in the sidebar.
-
-### React client in dev mode
+Build do cliente:
 
 ```bash
 cd client
-npm run dev      # Vite on :5173, proxies /api → http://localhost:8080
+npm run build
 ```
 
-For production, build the static client and serve it from the Go server:
+Testes equivalentes ao CI:
 
 ```bash
-cd client && npm run build && cd ..
-go run ./cmd/server -static client/dist -addr :8080
+go vet ./...
+go build ./...
+go test -race -count=1 ./...
+
+cd client
+npx tsc -b
+npm run build
 ```
 
-### Server flags
+## Documentação da integração Chatspot
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `-addr` | `:8080` | HTTP listen address |
-| `-db` | `wacalls.db` | SQLite session database path |
-| `-static` | `client/dist` | Static client directory (optional) |
-| `-debug` | `false` | Verbose logging (includes whatsmeow's internal log) |
-| `-max-calls-per-session` | `8` | Max concurrent calls per session (`0` = unlimited) |
+- [`docs/CHATSPOT_CALLS_V2_CONTRACT.md`](./docs/CHATSPOT_CALLS_V2_CONTRACT.md)
+- [`docs/LOVABLE_V2_MIGRATION_PROMPT.md`](./docs/LOVABLE_V2_MIGRATION_PROMPT.md)
+- [`docs/V2_IMPLEMENTATION_STATUS.md`](./docs/V2_IMPLEMENTATION_STATUS.md)
 
----
+## Segurança
 
-## API
+O banco de sessões contém material sensível do WhatsApp e nunca deve ser publicado.
 
-All routes are session-scoped. Events stream over a single SSE channel, tagged with the
-originating `sessionId`.
+Não commitar:
 
-| Method | Route | Purpose |
-|---|---|---|
-| `GET` | `/api/sessions` | List accounts (id, name, jid, status, paired) |
-| `POST` | `/api/sessions` | Create an account and begin QR pairing |
-| `DELETE` | `/api/sessions/{sid}` | Log out and remove an account |
-| `POST` | `/api/sessions/{sid}/logout` | Disconnect an account (keep it for re-pairing) |
-| `POST` | `/api/sessions/{sid}/pair` | Re-pair an account (emit a fresh QR) |
-| `POST` | `/api/sessions/{sid}/calls` | Start an outgoing call (`{ phone, duration_ms?, record? }`) |
-| `POST` | `/api/sessions/{sid}/calls/{id}/webrtc` | Exchange the browser WebRTC SDP |
-| `POST` | `/api/sessions/{sid}/calls/{id}/accept` | Accept an incoming call |
-| `POST` | `/api/sessions/{sid}/calls/{id}/reject` | Reject an incoming call |
-| `DELETE` | `/api/sessions/{sid}/calls/{id}` | End an active call |
-| `GET` | `/api/sessions/{sid}/history` | Recent call history (up to 50 records) |
-| `GET` | `/api/events` | Server-sent events (sessions, auth, call lifecycle) |
+- bancos SQLite de sessão;
+- backups de sessão;
+- tokens;
+- cookies;
+- chaves privadas;
+- HMAC secrets;
+- `.env` de produção;
+- BasicAuth real;
+- gravações de chamadas.
 
----
+O código pode ser público sem tornar esses valores públicos. Credenciais devem existir apenas no ambiente de runtime/deploy.
 
-## Tests
+## Créditos
 
-```bash
-go test ./...                 # media stack: SRTP, STUN, RTP, relay-ack, codec, state
-cd client && npm run build    # client type-check + production build
-```
+Este trabalho existe graças aos projetos e pesquisadores que construíram as camadas anteriores:
 
----
+- [JotaDev66/WaCalls](https://github.com/JotaDev66/WaCalls), projeto original deste fork;
+- [purpshell/meowcaller](https://github.com/purpshell/meowcaller), motor VoIP usado pela v2;
+- [polymorfa/hypermeow](https://github.com/polymorfa/hypermeow), camada WhatsApp Web usada pelo Meowcaller atual;
+- [oxidezap/whatsapp-rust](https://github.com/oxidezap/whatsapp-rust), implementação e pesquisa de referência do protocolo;
+- [WhatsApp Calls Research Group](https://wacrg.org), pesquisa aberta sobre chamadas WhatsApp;
+- [Pion WebRTC](https://github.com/pion/webrtc), bridge WebRTC em Go.
 
-## Security
+Contribuições genéricas que não dependam do Chatspot devem, sempre que possível, ser separadas para facilitar contribuição de volta aos projetos upstream.
 
-The API has **no authentication** — anyone with HTTP access can create accounts, place
-calls, and read history. **Run it only on a trusted LAN.** `wacalls.db` holds WhatsApp
-session credentials (secrets): **do not commit it** and keep it protected.
-
----
-
-## Contributors
-
-This project builds on the work of:
-
-<div align="center">
-
-<a href="https://github.com/jotadev66"><img src="https://github.com/jotadev66.png" width="72" height="72" style="border-radius:50%" alt="jotadev66"/></a>
-<a href="https://github.com/jobasfernandes"><img src="https://github.com/jobasfernandes.png" width="72" height="72" style="border-radius:50%" alt="jobasfernandes"/></a>
-<a href="https://github.com/edgardmessias"><img src="https://github.com/edgardmessias.png" width="72" height="72" style="border-radius:50%" alt="edgardmessias"/></a>
-<a href="https://github.com/w3nder"><img src="https://github.com/w3nder.png" width="72" height="72" style="border-radius:50%" alt="w3nder"/></a>
-
-[**@jotadev66**](https://github.com/jotadev66) · [**@jobasfernandes**](https://github.com/jobasfernandes) · [**@edgardmessias**](https://github.com/edgardmessias) · [**@w3nder**](https://github.com/w3nder)
-
-</div>
-
----
-
-## Acknowledgements
-
-- [**whatsmeow**](https://github.com/tulir/whatsmeow) — Go WhatsApp Web protocol library
-- [**pion/webrtc**](https://github.com/pion/webrtc) — pure-Go WebRTC stack (ICE + DTLS + SCTP)
-- [**whatsapp-rust**](https://github.com/oxidezap/whatsapp-rust) — reference MLow codec implementation (ported to the vendored pure-Go `internal/voip/media/mlow`)
-- [**zapo**](https://github.com/w3nder/zapo) — VoIP media-stack reference
-
----
-
-## License
+## Licença
 
 [MIT](./LICENSE)

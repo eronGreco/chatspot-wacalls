@@ -105,6 +105,9 @@ func TestRecordingServiceUploadsTranscribesAndCompletes(t *testing.T) {
 		ConnectedAt: time.Date(2026, 9, 29, 20, 0, 0, 0, time.UTC),
 		State:       "queued",
 	}
+	job.MediaHistory = newMediaHistory(job.ConnectedAt.UnixMilli(), false, false)
+	job.MediaHistory.transition(job.ConnectedAt.UnixMilli()+1000, true, false)
+	job.MediaHistory.close(job.ConnectedAt.UnixMilli() + 2000)
 	if err := s.saveJob(dir, job); err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +132,10 @@ func TestRecordingServiceUploadsTranscribesAndCompletes(t *testing.T) {
 	}
 	if doneBody == nil {
 		t.Fatal("done was not called")
+	}
+	mh, ok := doneBody["mediaHistory"].(map[string]any)
+	if !ok || mh["profile"] != "mixed" || doneBody["videoRecordingSupported"] != false {
+		t.Fatal("missing authoritative recording metadata", doneBody)
 	}
 	lines, ok := doneBody["lines"].([]any)
 	if !ok || len(lines) != 2 {

@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "v2/meowcaller"]
   pull_request:
-    branches: [main]
+    branches: [main, "v2/meowcaller"]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -48,10 +49,16 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Install video test dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: Test
         env:
           CGO_ENABLED: "1"
-        run: go test -race -count=1 ./...
+          REQUIRE_VIDEO_FFMPEG: "true"
+        run: |
+          go test -race -count=1 ./...
+          go -C third_party/meowcaller test -race -count=1 ./...
 
   client:
     name: client

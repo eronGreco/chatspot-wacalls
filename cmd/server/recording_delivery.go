@@ -105,9 +105,11 @@ func (s *recordingService) processJob(dir string, job *recordingJob) error {
 		Error string `json:"error"`
 	}
 	if err := s.postJSON("done", map[string]any{
-		"callId": job.CallID,
-		"lines":  lines,
-		"error":  nilIfEmpty(job.TranscriptError),
+		"callId":                  job.CallID,
+		"lines":                   lines,
+		"error":                   nilIfEmpty(job.TranscriptError),
+		"mediaHistory":            job.MediaHistory,
+		"videoRecordingSupported": s.videoSupported(),
 	}, &doneResp); err != nil {
 		return err
 	}
@@ -137,6 +139,7 @@ func (s *recordingService) uploadAndConfirm(job *recordingJob, finalPath string)
 		}
 		if err := s.postJSON("upload-url", map[string]any{
 			"callId":   job.CallID,
+			"artifact": "audio",
 			"mimeType": job.MimeType,
 			"name":     job.Name,
 		}, &uploadResp); err != nil {
@@ -149,6 +152,9 @@ func (s *recordingService) uploadAndConfirm(job *recordingJob, finalPath string)
 			return "", permanentError{errors.New(uploadResp.Error)}
 		}
 		if uploadResp.AlreadyUploaded {
+			if uploadResp.FileID == "" {
+				return "", retryableError{fmt.Errorf("confirmed audio upload returned empty fileId")}
+			}
 			return uploadResp.FileID, nil
 		}
 		if uploadResp.TempFileID == "" || uploadResp.URLUpload == "" {
@@ -173,6 +179,7 @@ func (s *recordingService) uploadAndConfirm(job *recordingJob, finalPath string)
 		}
 		if err := s.postJSON("confirm", map[string]any{
 			"callId":     job.CallID,
+			"artifact":   "audio",
 			"tempFileId": uploadResp.TempFileID,
 			"mimeType":   job.MimeType,
 			"size":       job.Size,
@@ -185,6 +192,9 @@ func (s *recordingService) uploadAndConfirm(job *recordingJob, finalPath string)
 				confirmResp.Error = "confirm returned ok=false"
 			}
 			return "", permanentError{errors.New(confirmResp.Error)}
+		}
+		if confirmResp.FileID == "" {
+			return "", retryableError{fmt.Errorf("confirm returned empty fileId")}
 		}
 		return confirmResp.FileID, nil
 	}

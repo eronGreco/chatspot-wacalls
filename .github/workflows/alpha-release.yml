@@ -1,0 +1,88 @@
+name: Alpha release
+
+on:
+  push:
+    branches:
+      - "v2/meowcaller"
+
+permissions:
+  contents: write
+
+jobs:
+  alpha:
+    if: contains(github.event.head_commit.message, '[alpha-release]')
+    runs-on: ubuntu-latest
+    env:
+      TAG: v2.0.0-alpha.11
+      CGO_ENABLED: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify modules
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Install video recording codecs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version
+
+      - name: Validate server
+        env:
+          CGO_ENABLED: "1"
+          REQUIRE_VIDEO_FFMPEG: "1"
+        run: |
+          test -z "$(gofmt -l cmd internal third_party)"
+          go vet ./...
+          go -C third_party/meowcaller vet ./...
+          go test -race -count=1 ./...
+          go -C third_party/meowcaller test -race -count=1 ./...
+
+      - name: Build linux/amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w" -o dist/wacalls-server-linux-amd64 ./cmd/server
+          sha256sum dist/wacalls-server-linux-amd64 > dist/wacalls-server-linux-amd64.sha256
+
+      - name: Smoke test binary
+        run: |
+          test -s dist/wacalls-server-linux-amd64
+          file dist/wacalls-server-linux-amd64
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Chatspot Calls v2.0.0-alpha.11
+          prerelease: true
+          draft: false
+          generate_release_notes: false
+          body: |
+            Correções de vídeo em chamadas que começaram por áudio e da orientação da gravação do cliente.
+
+            Aceitar vídeo com câmera envia o aceite e anuncia H.264 sem criar outro pedido cruzado que bloqueie o envio do agente. Religar a câmera após negociação concluída não solicita um novo upgrade. Recebimento sem câmera continua disponível; falhas de sinalização podem ser recuperadas e respostas tardias não desfazem um desligamento de câmera.
+
+            A montagem MP4 passa a usar a mesma orientação da imagem ao vivo para 90° e 270°, preservando 0°/180° e a câmera do agente. Gravações antigas não são reprocessadas.
+
+            Validação: testes de protocolo para ambos os iniciadores, recebimento sem câmera, retomada, falhas e cancelamento; vet e testes com detector de concorrência nos dois módulos; teste FFmpeg de gravação nas quatro orientações.
+
+            Requer FFmpeg com libx264/AAC e a atualização correspondente da interface no Lovable. Preserve o volume /data, as configurações de gravação e as sessões existentes na atualização. Os arquivos desta release são para Linux amd64.
+
+            A instalação no Portainer e a validação de uma chamada real entre dois aparelhos ainda precisam ser feitas.
+          files: |
+            dist/wacalls-server-linux-amd64
+            dist/wacalls-server-linux-amd64.sha256

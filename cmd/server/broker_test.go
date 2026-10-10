@@ -25,27 +25,41 @@ func TestOwnerActiveCall(t *testing.T) {
 	}
 }
 
-func TestPeerPhonePersistsIntoHistory(t *testing.T) {
+func TestTryReserveOwnerIsExclusive(t *testing.T) {
 	b := NewBroker()
-	b.upsertCall(CallRecord{
-		SessionID: "s1",
-		CallID:    "c-phone",
-		Direction: "inbound",
-		Peer:      "144512865284260@lid",
-		PeerPhone: "5537933002826",
-		Status:    StatusRinging,
-	})
-
-	b.endCall("c-phone", "user")
-
-	rows := b.historyRows("s1", 10)
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 history row, got %d", len(rows))
+	results := make(chan bool, 2)
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			results <- b.tryReserveOwner("op-A")
+		}()
 	}
-	if rows[0].Peer != "144512865284260@lid" {
-		t.Fatalf("peer changed unexpectedly: %q", rows[0].Peer)
+	close(start)
+	a, c := <-results, <-results
+	if a == c {
+		t.Fatalf("exactly one reservation must succeed, got %v and %v", a, c)
 	}
-	if rows[0].PeerPhone != "5537933002826" {
-		t.Fatalf("expected real peerPhone in history, got %q", rows[0].PeerPhone)
+}
+
+func TestTryReserveOwnerBlocksActiveCall(t *testing.T) {
+	b := NewBroker()
+	b.upsertCall(CallRecord{SessionID: "s1", CallID: "c1", Owner: ownerPtr("op-A"), Status: StatusConnected})
+	if b.tryReserveOwner("op-A") {
+		t.Fatal("must not reserve for an owner with an already-active call")
+	}
+}
+
+func TestReleaseReservationAllowsRetry(t *testing.T) {
+	b := NewBroker()
+	if !b.tryReserveOwner("op-A") {
+		t.Fatal("first reservation should succeed")
+	}
+	if b.tryReserveOwner("op-A") {
+		t.Fatal("second reservation while first is held must fail")
+	}
+	b.releaseReservation("op-A")
+	if !b.tryReserveOwner("op-A") {
+		t.Fatal("reservation should be available again after release")
 	}
 }

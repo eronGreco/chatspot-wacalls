@@ -1,0 +1,135 @@
+# Chatspot Calls v2 — status da migração
+
+Branch: `v2/meowcaller`
+
+PR: `#3`
+
+## Arquitetura escolhida
+
+A aplicação continua responsável por HTTP/SSE, sessões, QR, ownership, WebRTC do browser e integração Chatspot.
+
+O motor do protocolo de chamadas passa a ser:
+
+```text
+Meowcaller
+    ↓
+HyperMeow
+    ↓
+WhatsApp
+```
+
+O motor VoIP manual herdado do WaCalls foi removido da branch v2:
+
+- `internal/voip/call` removido;
+- `internal/voip/core` removido;
+- `internal/voip/signaling` removido;
+- `internal/voip/transport` removido;
+- `internal/voip/wanode` removido;
+- `internal/wa` removido;
+- MLow/RTP/SRTP/RTCP/STUN próprios removidos.
+
+O diretório `internal/voip/media` contém somente helpers genéricos usados pela ponte Browser ↔ Backend: PCM e envelope de quadro de vídeo, além dos testes correspondentes. Eles não implementam o protocolo de chamadas do WhatsApp.
+
+## Portado da v1.1.0-chatspot
+
+- serviço de gravação server-side;
+- duas trilhas PCM: agent/customer;
+- sincronização e preenchimento com silêncio;
+- WAV estéreo L=agent / R=customer;
+- chunks mono para transcrição;
+- fila persistente em disco;
+- retry progressivo;
+- recovery após restart;
+- HMAC para Chatspot Calls;
+- upload-url → upload → confirm → transcribe → done;
+- limpeza local somente depois da entrega completa;
+- `peerPhone` separado do LID técnico.
+
+## Integração da gravação com Meowcaller
+
+Atendente:
+
+```text
+browser PCM
+  → liveAudioSource.push
+  → recording.writeAgent
+  → Meowcaller AudioSource
+```
+
+Cliente:
+
+```text
+Meowcaller Call.Receive
+  → Bridge.WritePCM
+  → recording.writeCustomer
+  → browser
+```
+
+A gravação começa quando a chamada entra em `CallPhaseActive` e é finalizada no teardown da chamada.
+
+O servidor continua sendo apenas armazenamento temporário da gravação. O destino definitivo continua sendo o Chatspot.
+
+## Contrato Lovable
+
+A etapa de paridade preserva a API/SSE já consumida pelo Chatspot Calls. O Lovable não conversa diretamente com Meowcaller nem HyperMeow.
+
+Ver:
+
+- `docs/CHATSPOT_CALLS_V2_CONTRACT.md`
+- `docs/LOVABLE_V2_MIGRATION_PROMPT.md`
+
+## Validação automática
+
+CI da branch v2 está **verde**.
+
+Validado pelo GitHub Actions:
+
+- server: `go mod download` / `go mod verify`;
+- server: `go vet ./...`;
+- server: `gofmt`;
+- server: `go build ./...`;
+- server: `go test -race -count=1 ./...`;
+- client: `npm ci`;
+- client: TypeScript type-check;
+- client: build de produção.
+
+Além disso, o patch que preserva `peerPhone` no registro final das chamadas de saída foi aplicado e passou em `go test ./...` antes da alpha 2.
+
+Isso comprova compilação e testes automatizados, mas não substitui os testes reais contra o WhatsApp e o Chatspot.
+
+## Build de homologação
+
+A build destinada ao primeiro teste real é:
+
+`v2.0.0-alpha.2`
+
+A `v2.0.0-alpha.1` foi substituída antes do deploy e não deve ser usada.
+
+## Gates de paridade obrigatórios restantes
+
+- restauração de sessão pareada do banco/volume atual;
+- criação de sessão e QR;
+- chamada 1:1 saída;
+- chamada 1:1 entrada;
+- accept/reject/end;
+- áudio bidirecional;
+- peerPhone correto em LID;
+- ownership;
+- gravação server-side;
+- canais L/R corretos;
+- upload final no Chatspot;
+- transcrição/resumo/nota;
+- retry/recovery da gravação após restart.
+
+## Depois da paridade
+
+Só então validar e integrar no Chatspot Calls:
+
+1. vídeo 1:1 de saída;
+2. vídeo 1:1 de entrada;
+3. upgrade áudio ↔ vídeo;
+4. adicionar terceiro participante à chamada atual;
+5. chamada de grupo;
+6. vídeo multiparte.
+
+Chamadas em grupo são experimentais e exigem teste real antes de serem tratadas como estáveis.

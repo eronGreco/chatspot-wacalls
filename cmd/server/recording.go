@@ -28,6 +28,7 @@ type callRecorder struct {
 	agent     *pcmTrack
 	customer  *pcmTrack
 	closed    bool
+	video     *videoCapture
 }
 
 func newCallRecorder(rootDir, callID string, startedAt time.Time) (*callRecorder, error) {
