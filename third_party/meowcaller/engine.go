@@ -58,6 +58,8 @@ type engineCall struct {
 	localVideo        bool         // this client is sending, or has requested to send, video
 	remoteVideo       bool         // the peer is sending video to this client
 	videoGate         bool         // outbound upgrade is waiting for peer acceptance
+	videoNegotiated   bool         // video was accepted; camera restarts need state 1, not another upgrade
+	videoRevision     uint64       // prevents delayed signaling from undoing a newer camera operation
 	peerVideoUpgrade  bool         // the peer's inbound upgrade is waiting for local acceptance
 	videoTx           *videoSender // video send pipeline, live while media runs
 	videoRecovery     *videoRecovery
@@ -257,6 +259,10 @@ func (e *engine) sendVideoFrame(callID string, au []byte, duration time.Duration
 }
 
 func (e *engine) transitionVideo(callID string, transition int) error {
+	return e.transitionVideoWithCamera(callID, transition, false)
+}
+
+func (e *engine) transitionVideoWithCamera(callID string, transition int, sendVideo bool) error {
 	e.mu.Lock()
 	m := e.calls[callID]
 	if m == nil || m.call == nil || m.call.State() == CallPhaseEnded {
@@ -265,10 +271,17 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 	}
 	to, creator, sender := m.from, m.creator, m.videoTx
 	localVideoActive := m.localVideo
+	revision := m.videoRevision
 	switch transition {
 	case signaling.VideoStateUpgradeRequestV2:
+		if m.videoNegotiated || m.remoteVideo || (m.localVideo && !m.videoGate) {
+			e.mu.Unlock()
+			return e.setVideoEnabled(callID, true)
+		}
 		m.localVideo = true
 		m.videoGate = true
+		m.videoRevision++
+		revision = m.videoRevision
 	case signaling.VideoStateUpgradeAccept, signaling.VideoStateUpgradeReject:
 		if !m.peerVideoUpgrade {
 			e.mu.Unlock()
@@ -278,11 +291,11 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 	case signaling.VideoStateStopped:
 		m.localVideo = false
 		m.videoGate = false
+		m.videoRevision++
 	default:
 		e.mu.Unlock()
 		return fmt.Errorf("meowcaller: unsupported local video transition %d", transition)
 	}
-	e.mu.Unlock()
 	if sender != nil {
 		if transition == signaling.VideoStateStopped {
 			sender.disable()
@@ -290,6 +303,7 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 			sender.enable(true)
 		}
 	}
+	e.mu.Unlock()
 
 	build := func(state int, dec string, orientation *int) waBinary.Node {
 		return signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
@@ -307,7 +321,7 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 		orientation := 0
 		err = send(transition, signaling.VideoDecRequest, &orientation)
 	case signaling.VideoStateUpgradeAccept:
-		if !localVideoActive {
+		if !localVideoActive && !sendVideo {
 			orientation := 0
 			err = send(signaling.VideoStateStopped, "", &orientation)
 		}
@@ -320,13 +334,25 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 		orientation := 0
 		err = send(transition, "", &orientation)
 	}
+	if err == nil && transition == signaling.VideoStateUpgradeAccept {
+		e.mu.Lock()
+		if current := e.calls[callID]; current == m {
+			current.videoNegotiated = true
+		}
+		e.mu.Unlock()
+		if sendVideo {
+			// The operator consented to sending a camera with this acceptance.
+			// Announce it directly; a crossed upgrade would gate it again.
+			return e.setVideoEnabledForRevision(callID, true, &revision)
+		}
+	}
 	if err == nil || transition == signaling.VideoStateStopped {
 		return err
 	}
 
 	e.mu.Lock()
 	var currentSender *videoSender
-	if current := e.calls[callID]; current == m {
+	if current := e.calls[callID]; current == m && current.videoRevision == revision {
 		if transition == signaling.VideoStateUpgradeAccept || transition == signaling.VideoStateUpgradeReject {
 			current.peerVideoUpgrade = true
 		} else {
@@ -335,32 +361,42 @@ func (e *engine) transitionVideo(callID string, transition int) error {
 			currentSender = current.videoTx
 		}
 	}
-	e.mu.Unlock()
 	if currentSender != nil {
 		currentSender.disable()
 	}
+	e.mu.Unlock()
 	return err
 }
 
 func (e *engine) setVideoEnabled(callID string, enabled bool) error {
+	return e.setVideoEnabledForRevision(callID, enabled, nil)
+}
+
+func (e *engine) setVideoEnabledForRevision(callID string, enabled bool, expectedRevision *uint64) error {
 	e.mu.Lock()
 	m := e.calls[callID]
 	if m == nil || m.call == nil || m.call.State() == CallPhaseEnded {
 		e.mu.Unlock()
 		return errors.New("meowcaller: call is not active")
 	}
+	if expectedRevision != nil && m.videoRevision != *expectedRevision {
+		e.mu.Unlock()
+		return errors.New("meowcaller: video transition superseded")
+	}
+	m.videoRevision++
+	revision := m.videoRevision
 	m.localVideo = enabled
-	m.videoGate = false
+	m.videoGate = enabled // Hold frames until the camera-on announcement succeeds.
 	to, creator, sender := m.from, m.creator, m.videoTx
-	e.mu.Unlock()
 
 	if sender != nil {
 		if enabled {
-			sender.enable(false)
+			sender.enable(true)
 		} else {
 			sender.disable()
 		}
 	}
+	e.mu.Unlock()
 	state, dec := signaling.VideoStateDisabled, ""
 	if enabled {
 		state, dec = signaling.VideoStateEnabled, signaling.VideoStateDecH264
@@ -370,18 +406,25 @@ func (e *engine) setVideoEnabled(callID string, enabled bool) error {
 		State: state, Dec: dec,
 	})
 	err := e.transmitCallNode(context.Background(), node)
-	if err == nil || !enabled {
+	if !enabled {
 		return err
 	}
 
 	e.mu.Lock()
-	if current := e.calls[callID]; current == m {
-		current.localVideo = false
+	if current := e.calls[callID]; current == m && current.videoRevision == revision {
+		current.videoGate = false
+		if err != nil {
+			current.localVideo = false
+		}
+		if sender != nil {
+			if err == nil {
+				sender.enable(false)
+			} else {
+				sender.disable()
+			}
+		}
 	}
 	e.mu.Unlock()
-	if sender != nil {
-		sender.disable()
-	}
 	return err
 }
 
@@ -1167,6 +1210,7 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
 		m.peerVideoUpgrade = true
 	case signaling.VideoStateEnabled:
 		m.remoteVideo = true
+		m.videoNegotiated = true
 		if m.localVideo && m.videoGate {
 			m.videoGate = false
 			enableSender = true
@@ -1181,6 +1225,7 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
 		}
 		m.localVideo = true
 		m.videoGate = false
+		m.videoNegotiated = true
 		announceEnabled = true
 	case signaling.VideoStateUpgradeReject, signaling.VideoStateUpgradeCancel:
 		m.peerVideoUpgrade = false
@@ -1190,16 +1235,17 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
 			disableSender = true
 		}
 	}
+	revision := m.videoRevision
 	e.mu.Unlock()
 	if announceEnabled {
 		orientation := 0
 		node := signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
 			CallID: callID, To: to, CallCreator: creator, WrapperID: e.nextCallNodeID(),
-			State: signaling.VideoStateEnabled, DeviceOrientation: &orientation,
+			State: signaling.VideoStateEnabled, Dec: signaling.VideoStateDecH264, DeviceOrientation: &orientation,
 		})
 		if err := e.transmitCallNode(context.Background(), node); err != nil {
 			e.mu.Lock()
-			if current := e.calls[callID]; current == m {
+			if current := e.calls[callID]; current == m && current.videoRevision == revision {
 				current.localVideo = false
 				current.videoGate = false
 			}
@@ -1215,11 +1261,15 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
 		}
 	}
 	if sender != nil {
-		if enableSender {
-			sender.enable(false)
-		} else if disableSender {
-			sender.disable()
+		e.mu.Lock()
+		if current := e.calls[callID]; current == m && current.videoRevision == revision {
+			if enableSender && current.localVideo {
+				sender.enable(false)
+			} else if disableSender {
+				sender.disable()
+			}
 		}
+		e.mu.Unlock()
 	}
 	if requestKeyframe && call != nil {
 		call.requestVideoKeyframe()

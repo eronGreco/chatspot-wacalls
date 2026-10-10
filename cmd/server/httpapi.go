@@ -610,8 +610,9 @@ func (s *server) doVideoStop(sess *Session, w http.ResponseWriter, r *http.Reque
 // call-peer-video com upgrade=true) — sem isso o vídeo dele fica represado
 // no meowcaller e o app dele acaba desistindo depois de retentar algumas
 // vezes. Diferente de doVideoStart (que pede UM upgrade nosso), aqui é
-// Call.AcceptVideo(): confirma o dele sem mudar nosso próprio estado de
-// saída. É acionado só quando o operador aceita a notificação na UI —
+// Call.AcceptVideoWithCamera(): confirma o dele e anuncia nossa câmera só
+// se o operador escolher enviar vídeo, sem criar outro pedido de upgrade.
+// É acionado só quando o operador aceita a notificação na UI —
 // nunca automaticamente (ver OnVideoState em session.go).
 func (s *server) doVideoAccept(sess *Session, w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -635,14 +636,7 @@ func (s *server) doVideoAccept(sess *Session, w http.ResponseWriter, r *http.Req
 		return
 	}
 	sendVideo := body.SendVideo == nil || *body.SendVideo
-	if sendVideo {
-		// Start before Accept avoids announcing our camera as stopped.
-		if err := ac.call.StartVideo(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-	}
-	if err := ac.call.AcceptVideo(); err != nil {
+	if err := ac.call.AcceptVideoWithCamera(sendVideo); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

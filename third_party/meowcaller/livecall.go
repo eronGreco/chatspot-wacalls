@@ -293,8 +293,8 @@ func (c *Call) Reject() error { return c.eng.reject(c) }
 // Hangup ends the call (either direction) and tears down media.
 func (c *Call) Hangup() error { return c.eng.hangup(c) }
 
-// StartVideo requests an audio-to-video upgrade. Outbound video remains gated until
-// the peer acknowledges the transition with state 4 or state 1.
+// StartVideo requests an audio-to-video upgrade, gated until the peer acknowledges
+// with state 4 or 1. After video is negotiated, it only enables this camera.
 func (c *Call) StartVideo() error {
 	return c.eng.transitionVideo(c.id, signaling.VideoStateUpgradeRequestV2)
 }
@@ -303,6 +303,13 @@ func (c *Call) StartVideo() error {
 // independent outbound video state.
 func (c *Call) AcceptVideo() error {
 	return c.eng.transitionVideo(c.id, signaling.VideoStateUpgradeAccept)
+}
+
+// AcceptVideoWithCamera accepts a pending peer upgrade and optionally announces
+// the operator's camera without requesting a second, crossed upgrade. False keeps
+// the existing independent camera state, including receive-only acceptance.
+func (c *Call) AcceptVideoWithCamera(sendVideo bool) error {
+	return c.eng.transitionVideoWithCamera(c.id, signaling.VideoStateUpgradeAccept, sendVideo)
 }
 
 // RejectVideo declines a pending peer upgrade without changing either active camera.
